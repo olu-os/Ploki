@@ -1,0 +1,7 @@
+{
+  "name": "Ploki",
+  "description": "A voice-to-storywriter app for writing scripts with your voice.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
