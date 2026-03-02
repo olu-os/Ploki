@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Mic, MicOff, Save, FileText, Settings, Users, Plus, Play, Pause, Download } from "lucide-react";
 import { motion } from "motion/react";
-import html2pdf from "html2pdf.js";
+import jsPDF from "jspdf";
 import { Project, Character, ParsedBlock } from "./types";
 
 export default function App() {
@@ -78,24 +78,96 @@ export default function App() {
   };
 
   const exportToPdf = () => {
-    if (!currentProject) return;
-    const element = document.getElementById("script-content");
-    if (!element) return;
-
-    // Clone the element to remove the delete buttons before exporting
-    const clone = element.cloneNode(true) as HTMLElement;
-    const deleteButtons = clone.querySelectorAll("button");
-    deleteButtons.forEach(btn => btn.remove());
-
-    const opt = {
-      margin:       1,
-      filename:     `${currentProject.title || "script"}.pdf`,
-      image:        { type: 'jpeg' as 'jpeg', quality: 0.98 },
-      html2canvas:  { scale: 2 },
-      jsPDF:        { unit: 'in', format: 'letter', orientation: 'portrait' as 'portrait' }
-    };
-
-    html2pdf().set(opt).from(clone).save();
+    if (!currentProject) {
+      console.log("No current project selected for PDF export.");
+      return;
+    }
+    try {
+      const doc = new jsPDF({ unit: 'pt', format: 'letter', orientation: 'portrait' });
+      let y = 60;
+      const leftMargin = 50;
+      const rightMargin = 50;
+      const pageWidth = 612; // 8.5in * 72pt
+      const usableWidth = pageWidth - leftMargin - rightMargin;
+      const lineHeight = 18;
+      const dialogueIndent = 120;
+      const dialogueWidth = usableWidth - 2 * dialogueIndent;
+      const parentheticalIndent = 140;
+      const parentheticalWidth = usableWidth - 2 * parentheticalIndent;
+      console.log("Starting PDF export for project:", currentProject.title);
+      blocks.forEach((b, idx) => {
+        let text = "";
+        if (b.type === "scene_heading") {
+          text = String(b.parsed).toUpperCase();
+          doc.setFont("courier", "bold");
+          doc.setFontSize(12);
+          doc.text(text, leftMargin, y);
+          y += lineHeight * 2;
+          console.log(`Block ${idx}: scene_heading - ${text}`);
+        } else if (b.type === "transition") {
+          text = String(b.parsed).toUpperCase();
+          doc.setFont("courier", "bold");
+          doc.setFontSize(12);
+          const textWidth = doc.getTextWidth(text);
+          doc.text(text, pageWidth - rightMargin - textWidth, y);
+          y += lineHeight * 2;
+          console.log(`Block ${idx}: transition - ${text}`);
+        } else if (b.type === "dialogue_block") {
+          // Speaker (centered, bold, all caps)
+          doc.setFont("courier", "bold");
+          doc.setFontSize(12);
+          let speaker = String(b.parsed.speaker).toUpperCase();
+          const speakerWidth = doc.getTextWidth(speaker);
+          doc.text(speaker, leftMargin + (usableWidth - speakerWidth) / 2, y);
+          y += lineHeight;
+          // Parenthetical (centered, italic, indented)
+          if (b.parsed.parenthetical) {
+            doc.setFont("courier", "italic");
+            doc.setFontSize(11);
+            let parenthetical = `(${b.parsed.parenthetical})`;
+            let parentheticalLines = doc.splitTextToSize(parenthetical, parentheticalWidth);
+            parentheticalLines.forEach(line => {
+              const pw = doc.getTextWidth(line);
+              doc.text(line, leftMargin + parentheticalIndent + (parentheticalWidth - pw) / 2, y);
+              y += lineHeight;
+            });
+          }
+          // Dialogue (centered, indented)
+          doc.setFont("courier", "normal");
+          doc.setFontSize(12);
+          let dialogue = String(b.parsed.dialogue);
+          let splitDialogue = doc.splitTextToSize(dialogue, dialogueWidth);
+          splitDialogue.forEach(line => {
+            const dw = doc.getTextWidth(line);
+            doc.text(line, leftMargin + dialogueIndent + (dialogueWidth - dw) / 2, y);
+            y += lineHeight;
+          });
+          y += lineHeight;
+          console.log(`Block ${idx}: dialogue_block - ${speaker}: ${dialogue}`);
+        } else if (b.type === "action") {
+          doc.setFont("courier", "normal");
+          doc.setFontSize(12);
+          let action = String(b.parsed);
+          let splitAction = doc.splitTextToSize(action, usableWidth);
+          splitAction.forEach(line => {
+            doc.text(line, leftMargin, y);
+            y += lineHeight;
+          });
+          y += lineHeight;
+          console.log(`Block ${idx}: action - ${action}`);
+        }
+        // Add page if needed
+        if (y > 750) {
+          doc.addPage();
+          y = 60;
+        }
+      });
+      const filename = `${currentProject.title || "script"}.pdf`;
+      doc.save(filename);
+      console.log("PDF export complete. Saved as:", filename);
+    } catch (err) {
+      console.error("Error exporting PDF:", err);
+    }
   };
 
   const fetchProjects = async () => {
