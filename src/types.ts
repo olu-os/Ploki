@@ -1,14 +1,14 @@
 export interface Project {
-  id: number;
-  user_id: number;
+  id: string;
+  user_id: string;
   title: string;
   content: string;
   updated_at: string;
 }
 
 export interface Character {
-  id: number;
-  user_id: number;
+  id: string;
+  user_id: string;
   canonical_name: string;
   aliases: string;
 }

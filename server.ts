@@ -133,12 +133,17 @@ async function startServer() {
     let parsedText = text;
     let type = "action"; // default
     
-    // Check for scene headings
+    // Check for scene headings (with or without colon)
     const lowerText = text.toLowerCase();
-    if (lowerText.startsWith("scene heading:") || lowerText.startsWith("new scene")) {
+    const sceneHeadingMatch = text.match(/^scene heading:?\s*(.+)/i);
+    if (sceneHeadingMatch) {
       type = "scene_heading";
-      parsedText = text.replace(/^(scene heading:|new scene,?\s*)/i, "").toUpperCase();
+      parsedText = sceneHeadingMatch[1].trim().toUpperCase();
       // Basic formatting if it contains exterior/interior
+      parsedText = parsedText.replace(/exterior/i, "EXT.").replace(/interior/i, "INT.");
+    } else if (lowerText.startsWith("new scene")) {
+      type = "scene_heading";
+      parsedText = text.replace(/^new scene,?\s*/i, "").toUpperCase();
       parsedText = parsedText.replace(/exterior/i, "EXT.").replace(/interior/i, "INT.");
     } else if (lowerText.startsWith("cut to") || lowerText.startsWith("fade out")) {
       type = "transition";
@@ -146,7 +151,7 @@ async function startServer() {
     } else {
       // Check for dialogue
       // "Emilio says Cass what did you do" or "Emilio angrily says..."
-      const dialogueMatch = text.match(/^([\w\s]+?)\s+(?:(\w+)\s+)?(says|asks|yells|whispers|replies)(?:\s+(.+))?$/i);
+      const dialogueMatch = text.match(/^([\w\s]+?)\s+(?:(\w+)\s+)?(says|asks|yells|whispers|replies|responds|queries)(?:\s+(.+))?$/i);
       if (dialogueMatch) {
         let speaker = dialogueMatch[1].trim();
         const adverb = dialogueMatch[2] ? dialogueMatch[2].toLowerCase() : "";
@@ -176,14 +181,30 @@ async function startServer() {
         else if (action === "yells") parenthetical = "(yelling)";
         else if (action === "asks") parenthetical = "(asking)";
         
+        // Extract inline parenthetical like "it's scary (in a scared manner)"
+        console.log("[parse] dialogue before paren extract:", JSON.stringify(dialogue));
+        const inlineParenMatch = dialogue.match(/^(.*?)\s*\(([^)]+)\)\s*(.*)$/);
+        console.log("[parse] inlineParenMatch:", inlineParenMatch);
+        if (inlineParenMatch) {
+          const beforeParen = inlineParenMatch[1].trim();
+          const parenContent = inlineParenMatch[2].trim();
+          const afterParen = inlineParenMatch[3].trim();
+          dialogue = (beforeParen + (afterParen ? " " + afterParen : "")).trim();
+          if (!parenthetical) {
+            parenthetical = parenContent;
+          }
+        }
+        console.log("[parse] final dialogue:", JSON.stringify(dialogue), "parenthetical:", JSON.stringify(parenthetical));
+
         parsedText = {
           speaker,
           parenthetical,
           dialogue
         };
       } else {
-        // Just action line
+        // Just action line — capitalize first letter
         type = "action";
+        parsedText = text.charAt(0).toUpperCase() + text.slice(1);
       }
     }
     
