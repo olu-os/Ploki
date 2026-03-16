@@ -6,6 +6,14 @@ export interface Project {
   updated_at: string;
 }
 
+export interface ProjectVersion {
+  id: string;
+  project_id: string;
+  user_id: string;
+  content: string;
+  created_at: string;
+}
+
 export interface Character {
   id: string;
   user_id: string;

@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Mic, MicOff, Save, FileText, Settings, Users, Plus, Play, Pause, Download, Undo, Redo, LogOut } from "lucide-react";
+import { Mic, MicOff, Save, FileText, Settings, Users, Plus, Play, Pause, Download, Undo, Redo, LogOut, History } from "lucide-react";
 import { motion } from "motion/react";
 import jsPDF from "jspdf";
-import { Project, Character, ParsedBlock } from "./types";
+import { Project, Character, ParsedBlock, ProjectVersion } from "./types";
 import { supabase } from "./lib/supabase";
 
 // CONT’D logic: pass lastSpeaker and set isContinued if needed
@@ -285,6 +285,9 @@ export default function App() {
   const [blocks, setBlocks] = useState<ParsedBlock[]>([]);
   const [history, setHistory] = useState<ParsedBlock[][]>([]);
   const [future, setFuture] = useState<ParsedBlock[][]>([]);
+  const [showVersionHistory, setShowVersionHistory] = useState(false);
+  const [versions, setVersions] = useState<ProjectVersion[]>([]);
+  const [loadingVersions, setLoadingVersions] = useState(false);
 
   const updateBlocks = (newBlocks: ParsedBlock[] | ((prev: ParsedBlock[]) => ParsedBlock[])) => {
     setBlocks(prev => {
@@ -590,8 +593,32 @@ export default function App() {
       .from("projects")
       .update({ title: currentProject.title, content, updated_at: new Date().toISOString() })
       .eq("id", currentProject.id);
+    await supabase
+      .from("project_versions")
+      .insert({ project_id: currentProject.id, content });
     await fetchProjects();
+    if (showVersionHistory) fetchVersions(currentProject.id);
     setTimeout(() => setIsSaving(false), 1000);
+  };
+
+  const fetchVersions = async (projectId: string) => {
+    setLoadingVersions(true);
+    const { data, error } = await supabase
+      .from("project_versions")
+      .select("*")
+      .eq("project_id", projectId)
+      .order("created_at", { ascending: false })
+      .limit(30);
+    if (error) { console.error(error); setLoadingVersions(false); return; }
+    setVersions(data || []);
+    setLoadingVersions(false);
+  };
+
+  const restoreVersion = (version: ProjectVersion) => {
+    requestConfirm("Restore this version? Current unsaved changes will be replaced.", () => {
+      parseContentToBlocks(version.content);
+      setShowVersionHistory(false);
+    });
   };
 
   const addCharacter = async () => {
@@ -1342,6 +1369,18 @@ function replaceSpokenPunctuation(text: string): string {
                   {isSaving ? "Saved!" : "Save"}
                 </button>
                 <button
+                  onClick={() => {
+                    setShowVersionHistory(v => !v);
+                    if (!showVersionHistory && currentProject) fetchVersions(currentProject.id);
+                  }}
+                  className={`flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                    showVersionHistory ? "bg-stone-200 text-stone-900" : "text-stone-600 hover:bg-stone-100"
+                  }`}
+                >
+                  <History size={16} />
+                  History
+                </button>
+                <button
                   onClick={() => toggleListening()}
                   className={`flex items-center gap-2 px-4 py-1 text-sm font-medium rounded-full transition-colors ${
                     isListening
@@ -1572,6 +1611,39 @@ function replaceSpokenPunctuation(text: string): string {
         </main>
       </div>
       {/* Confirm Dialog */}
+      {/* Version History Panel */}
+      {showVersionHistory && currentProject && (
+        <div className="fixed right-0 top-0 bottom-0 w-72 bg-white border-l border-stone-200 flex flex-col shadow-xl z-40">
+          <div className="p-4 border-b border-stone-200 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-stone-700">Version History</h3>
+            <button onClick={() => setShowVersionHistory(false)} className="text-stone-400 hover:text-stone-600 text-xl leading-none">×</button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-2">
+            {loadingVersions ? (
+              <div className="text-xs text-stone-400 text-center py-8">Loading...</div>
+            ) : versions.length === 0 ? (
+              <div className="text-xs text-stone-400 text-center py-8 italic px-4">No saved versions yet.<br/>Use Save to create a checkpoint.</div>
+            ) : (
+              <ul className="space-y-1">
+                {versions.map((v) => (
+                  <li key={v.id} className="group flex items-center justify-between px-3 py-2.5 rounded hover:bg-stone-50">
+                    <span className="text-xs text-stone-600">
+                      {new Date(v.created_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                    <button
+                      onClick={() => restoreVersion(v)}
+                      className="text-xs text-stone-400 hover:text-emerald-600 opacity-0 group-hover:opacity-100 transition-opacity font-medium"
+                    >
+                      Restore
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
+
       {confirmDialog.isOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-lg p-6 max-w-sm w-full mx-4">
