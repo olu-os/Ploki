@@ -11,33 +11,45 @@ function parseNLP(text: string, characters: Character[], lastSpeaker: string | n
   let type: ParsedBlock["type"] = "action";
   let isContinued = false;
   const lowerText = text.toLowerCase();
-  const sceneHeadingMatch = text.match(/^scene heading:?:?\s*(.+)/i);
+  // Accept both 'scene heading' and 'seen heading' (common mishearing)
+  const sceneHeadingMatch = text.match(/^(scene|seen) heading:?:?\s*(.+)/i);
   if (sceneHeadingMatch) {
     type = "scene_heading";
-    parsedText = sceneHeadingMatch[1].trim().toUpperCase();
+    parsedText = sceneHeadingMatch[2].trim().toUpperCase();
     parsedText = parsedText.replace(/exterior/i, "EXT.").replace(/interior/i, "INT.");
-  } else if (lowerText.startsWith("new scene")) {
+  } else if (lowerText.startsWith("new scene") || lowerText.startsWith("new seen")) {
     type = "scene_heading";
-    parsedText = text.replace(/^new scene,?\s*/i, "").toUpperCase();
+    parsedText = text.replace(/^new (scene|seen),?\s*/i, "").toUpperCase();
     parsedText = parsedText.replace(/exterior/i, "EXT.").replace(/interior/i, "INT.");
   } else if (lowerText.startsWith("cut to") || lowerText.startsWith("fade out")) {
     type = "transition";
     parsedText = text.toUpperCase() + ":";
+  } else if (/^act\s+(one|two|three|four|five|\d+)$/i.test(text.trim())) {
+    type = "act_header";
+    parsedText = text.trim().toUpperCase();
   } else {
-    // Dialogue: "Will says ..." or "Will quietly says ..."
-    const dialogueMatch = text.match(/^([\w\s]+?)\s+(?:(\w+)\s+)?(says|asks|yells|whispers|replies|responds|queries)(?:\s+(.+))?$/i);
+    // Extract para...para from anywhere in the full text before dialogue parsing
+    let preExtractedParenthetical = "";
+    let cleanedText = text;
+    const preParaMatch = text.match(/^(.*?)\s*(?:para|power|parenthetical)\s+(.+?)\s+(?:para|power|parenthetical)\s*(.*?)$/i);
+    if (preParaMatch) {
+      preExtractedParenthetical = preParaMatch[2].trim();
+      const before = preParaMatch[1].trim();
+      const after = preParaMatch[3].trim();
+      cleanedText = (before + (before && after ? " " : "") + after).trim();
+    }
+
+    // Dialogue: "Will says ..." or "Will continues ..."
+    const dialogueMatch = cleanedText.match(/^(.+?)\s+(says|asks|yells|whispers|replies|retorts|responds|queries|goes on|continues|shouts|screams|mumbles|stutters|exclaims|states|mentions|adds|tells|explains|argues|insists)(?:\s+(.+))?$/i);
     if (dialogueMatch) {
       let speaker = dialogueMatch[1].trim();
-      const adverb = dialogueMatch[2] ? dialogueMatch[2].toLowerCase() : "";
-      const action = dialogueMatch[3].toLowerCase();
-      let dialogue = dialogueMatch[4] ? dialogueMatch[4].trim() : "";
+      const action = dialogueMatch[2].toLowerCase();
+      let dialogue = dialogueMatch[3] ? dialogueMatch[3].trim() : "";
       dialogue = dialogue.replace(/^['"]|['"]$/g, "");
-      // CONT’D detection: if dialogue starts with "goes on" or "continues"
-      const contdMatch = dialogue.match(/^(goes on|continues)[,.\s]+(.*)$/i);
+      // CONT’D detection: if verb is 'continues' or 'goes on' and speaker matches lastSpeaker
       let isContd = false;
-      if (contdMatch && lastSpeaker && speaker.toUpperCase() === lastSpeaker.toUpperCase()) {
+      if ((action === "continues" || action === "goes on") && lastSpeaker && speaker.toUpperCase() === lastSpeaker.toUpperCase()) {
         isContd = true;
-        dialogue = contdMatch[2].trim();
       }
       // Alias lookup
       const charMatch = characters.find(c =>
@@ -50,12 +62,17 @@ function parseNLP(text: string, characters: Character[], lastSpeaker: string | n
         speaker = speaker.toUpperCase();
       }
       type = "dialogue_block";
-      let parenthetical = "";
+      let parenthetical = preExtractedParenthetical;
 
-      const paraMatch = dialogue.match(/^(?:para|power|parenthetical)\s+(.+?)\s+(?:para|power|parenthetical)\s+(.*)$/i);
-      if (paraMatch) {
-        if (!parenthetical) parenthetical = paraMatch[1].trim();
-        dialogue = paraMatch[2].trim();
+      // para ... para can also appear inside the dialogue portion (if not already found)
+      if (!parenthetical) {
+        const paraMatch = dialogue.match(/^(.*?)\s*(?:para|power|parenthetical)\s+(.+?)\s+(?:para|power|parenthetical)\s*(.*?)$/i);
+        if (paraMatch) {
+          const before = paraMatch[1].trim();
+          const after = paraMatch[3].trim();
+          parenthetical = paraMatch[2].trim();
+          dialogue = (before + (before && after ? " " : "") + after).trim();
+        }
       }
       // Inline parenthetical extraction
       const inlineParenMatch = dialogue.match(/^(.*?)\s*\(([^)]+)\)\s*(.*)$/);
@@ -89,8 +106,7 @@ const InsertionBar = ({
   isListeningAtThisIndex,
   accumulatedTranscript,
   transcript,
-  secondsLeft,
-  onHoverChange
+  secondsLeft
 }: { 
   index: number, 
   onInsert: (index: number, type: string, template: any) => void,
@@ -98,8 +114,7 @@ const InsertionBar = ({
   isListeningAtThisIndex: boolean,
   accumulatedTranscript: string,
   transcript: string,
-  secondsLeft: number,
-  onHoverChange?: (index: number | null) => void
+  secondsLeft: number
 }) => {
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -115,10 +130,10 @@ const InsertionBar = ({
   }, []);
 
   return (
-    <div className="group/bar relative h-6 flex flex-col items-center justify-center -my-3 z-10" onMouseEnter={() => onHoverChange?.(index)} onMouseLeave={() => onHoverChange?.(null)}>
-      <div className="w-full h-[1px] bg-stone-200 opacity-0 group-hover/bar:opacity-100 transition-opacity" />
+    <div className={`group/bar relative h-6 flex flex-col items-center justify-center -my-3 transition-all ${showMenu ? 'z-50' : 'z-10'}`}>
+      <div className={`w-full h-[1px] bg-stone-200 transition-opacity ${showMenu ? 'opacity-100' : 'opacity-0 group-hover/bar:opacity-100'}`} />
       
-      <div className="absolute -left-8 opacity-0 group-hover/bar:opacity-100 transition-opacity flex items-center" ref={menuRef}>
+      <div className={`absolute -left-8 flex items-center transition-opacity ${showMenu ? 'opacity-100' : 'opacity-0 group-hover/bar:opacity-100'}`} ref={menuRef}>
         <button 
           onClick={() => setShowMenu(!showMenu)}
           className="p-1 bg-white border border-stone-200 rounded-full shadow-sm hover:bg-stone-50 text-stone-400 hover:text-stone-600"
@@ -127,7 +142,9 @@ const InsertionBar = ({
         </button>
         
         {showMenu && (
-          <div className="absolute left-8 top-0 bg-white border border-stone-200 rounded shadow-lg py-1 w-40 z-20">
+          <>
+            <div className="fixed inset-0 bg-transparent cursor-default" onClick={(e) => { e.stopPropagation(); setShowMenu(false); }} />
+            <div className="absolute left-8 top-0 bg-white border border-stone-200 rounded shadow-lg py-1 w-40 z-20">
             <button 
               onClick={() => { onInsert(index, "scene_heading", "INT. [LOCATION] - DAY"); setShowMenu(false); }}
               className="w-full text-left px-3 py-1.5 text-xs hover:bg-stone-50"
@@ -152,13 +169,20 @@ const InsertionBar = ({
             >
               Transition
             </button>
+            <button 
+              onClick={() => { onInsert(index, "act_header", "ACT ONE"); setShowMenu(false); }}
+              className="w-full text-left px-3 py-1.5 text-xs hover:bg-stone-50"
+            >
+              Act Header
+            </button>
           </div>
-        )}
+        </>
+      )}
       </div>
 
       {isListeningAtThisIndex && (
-        <div className="absolute top-6 w-full flex justify-center pointer-events-none">
-          <div className="bg-white/90 backdrop-blur-sm border border-emerald-100 shadow-lg rounded-lg px-4 py-2 flex items-center gap-3 z-50 max-w-lg">
+        <div className="w-full flex justify-center py-4">
+          <div className="bg-white border border-emerald-100 shadow-sm rounded-lg px-4 py-2 flex items-center gap-3 z-50 max-w-lg">
             <span className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
@@ -193,6 +217,58 @@ const InsertionBar = ({
     </div>
   );
 };
+
+const LINES_PER_PAGE = 45;
+
+function getBlockLines(block: ParsedBlock): number {
+  if (block.type === "scene_heading") return 3; // 1 for text + 2 for spacing
+  if (block.type === "transition") return 3;
+  if (block.type === "act_header") return 4; // centered bold underlined, extra spacing
+  if (block.type === "dialogue_block") {
+    let lines = 1; // Speaker
+    if (block.parsed.parenthetical) lines += 1;
+    // Estimate dialogue lines (approx 35 chars per line in dialogue width)
+    const dialogueLines = Math.ceil(block.parsed.dialogue.length / 35) || 1;
+    return lines + dialogueLines + 1; // +1 for bottom margin
+  }
+  // Action: approx 60 chars per line
+  const actionLines = Math.ceil((block.parsed as string).length / 60) || 1;
+  return actionLines + 1; // +1 for bottom margin
+}
+
+function paginateBlocks(blocks: ParsedBlock[]): { blocks: { block: ParsedBlock, index: number }[], pageNumber: number }[] {
+  const pages: { blocks: { block: ParsedBlock, index: number }[], pageNumber: number }[] = [];
+  let currentPage: { block: ParsedBlock, index: number }[] = [];
+  let currentLines = 0;
+
+  blocks.forEach((block, index) => {
+    const blockLines = getBlockLines(block);
+    if (currentLines + blockLines > LINES_PER_PAGE && currentPage.length > 0) {
+      pages.push({ blocks: currentPage, pageNumber: pages.length + 1 });
+      currentPage = [];
+      currentLines = 0;
+    }
+    currentPage.push({ block, index });
+    currentLines += blockLines;
+  });
+
+  if (currentPage.length > 0 || pages.length === 0) {
+    pages.push({ blocks: currentPage, pageNumber: pages.length + 1 });
+  }
+
+  return pages;
+}
+
+const Page: React.FC<{ pageNumber: number }> = ({ children, pageNumber }) => (
+  <div className="relative w-[8.5in] h-[11in] bg-white shadow-lg mb-8 pl-[1.5in] pr-[1in] pt-[1in] pb-[1in] font-mono text-[12pt] leading-[1.2] text-black overflow-hidden flex flex-col">
+    <div className="absolute top-[0.5in] right-[1in] text-right">
+      {pageNumber}.
+    </div>
+    <div className="flex-1">
+      {children}
+    </div>
+  </div>
+);
 
 export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -262,7 +338,6 @@ export default function App() {
   const [wordCount, setWordCount] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
   const [insertionIndex, setInsertionIndex] = useState<number | null>(null);
-  const [hoveredGap, setHoveredGap] = useState<number | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean;
     message: string;
@@ -301,7 +376,7 @@ export default function App() {
     // Calculate word count
     let count = 0;
     blocks.forEach(b => {
-      if (b.type === "action" || b.type === "scene_heading" || b.type === "transition") {
+      if (b.type === "action" || b.type === "scene_heading" || b.type === "transition" || b.type === "act_header") {
         count += (b.parsed as string).split(/\s+/).filter(w => w.length > 0).length;
       } else if (b.type === "dialogue_block") {
         count += b.parsed.dialogue.split(/\s+/).filter((w: string) => w.length > 0).length;
@@ -345,7 +420,9 @@ export default function App() {
 
     let output = "";
     blocks.forEach(b => {
-      if (b.type === "scene_heading") {
+      if (b.type === "act_header") {
+        output += center(String(b.parsed).toUpperCase()) + "\n\n";
+      } else if (b.type === "scene_heading") {
         output += String(b.parsed).toUpperCase() + "\n\n";
       } else if (b.type === "transition") {
         output += String(b.parsed).toUpperCase().padStart(PAGE_WIDTH) + "\n\n";
@@ -373,79 +450,92 @@ export default function App() {
     if (!currentProject) return;
     try {
       const doc = new jsPDF({ unit: 'pt', format: 'letter', orientation: 'portrait' });
-      let y = 72;
       const pageWidth = 612;
       const pageHeight = 792;
       const leftMargin = 108;  // 1.5"
       const rightMargin = 72;  // 1"
       const usableWidth = pageWidth - leftMargin - rightMargin; // 432pt
       const lineHeight = 14;
-
-      // Dialogue column mirrors the UI: centered 60% of usable width
       const dialogueColWidth = usableWidth * 0.6;
       const dialogueColLeft = leftMargin + (usableWidth - dialogueColWidth) / 2;
+      const topMargin = 72; // 1"
 
-      const checkPage = () => {
-        if (y > pageHeight - 72) { doc.addPage(); y = 72; }
+      // Draw text twice at a tiny offset to match the visual weight of Courier New on screen (except for bold)
+      const thickText = (text: string, x: number, yPos: number, isBold = false) => {
+        if (isBold) {
+          doc.text(text, x, yPos);
+        } else {
+          doc.text(text, x, yPos);
+          doc.text(text, x + 0.25, yPos);
+        }
       };
 
-      // Draw text twice at a tiny offset to match the visual weight of Courier New on screen
-      const thickText = (text: string, x: number, yPos: number) => {
-        doc.text(text, x, yPos);
-        doc.text(text, x + 0.25, yPos);
-      };
+      // Use paginateBlocks to split blocks into pages
+      const pages = paginateBlocks(blocks);
+      pages.forEach((page, pageIdx) => {
+        let y = topMargin;
+        // Draw page number at top right, matching UI
+        doc.setFont("courier", "normal");
+        doc.setFontSize(12);
+        thickText(`${page.pageNumber}.`, pageWidth - rightMargin, topMargin - 24);
 
-      blocks.forEach(b => {
-        if (b.type === "scene_heading") {
-          doc.setFont("courier", "bold");
-          doc.setFontSize(12);
-          const lines = doc.splitTextToSize(String(b.parsed).toUpperCase(), usableWidth);
-          lines.forEach((line: string) => { checkPage(); thickText(line, leftMargin, y); y += lineHeight; });
-          y += lineHeight;
-        } else if (b.type === "transition") {
-          doc.setFont("courier", "normal");
-          doc.setFontSize(12);
-          const text = String(b.parsed).toUpperCase();
-          checkPage();
-          thickText(text, pageWidth - rightMargin - doc.getTextWidth(text), y);
-          y += lineHeight * 2;
-        } else if (b.type === "dialogue_block") {
-          doc.setFont("courier", "normal");
-          doc.setFontSize(12);
-          const speaker = String(b.parsed.speaker).toUpperCase();
-          checkPage();
-          thickText(speaker, dialogueColLeft + (dialogueColWidth - doc.getTextWidth(speaker)) / 2, y);
-          y += lineHeight;
-          if (b.parsed.parenthetical) {
-            doc.setFont("courier", "italic");
-            doc.setFontSize(11);
-            const paren = `(${b.parsed.parenthetical})`;
-            doc.splitTextToSize(paren, dialogueColWidth).forEach((line: string) => {
-              checkPage();
-              thickText(line, dialogueColLeft + (dialogueColWidth - doc.getTextWidth(line)) / 2, y);
+        page.blocks.forEach(({ block: b }) => {
+          if (b.type === "act_header") {
+            doc.setFont("courier", "bold");
+            doc.setFontSize(12);
+            const actText = String(b.parsed).toUpperCase();
+            const actX = leftMargin + (usableWidth - doc.getTextWidth(actText)) / 2;
+            thickText(actText, actX, y, true);
+            doc.setLineWidth(0.75);
+            doc.line(actX, y + 2, actX + doc.getTextWidth(actText), y + 2);
+            y += lineHeight * 3;
+          } else if (b.type === "scene_heading") {
+            doc.setFont("courier", "bold");
+            doc.setFontSize(12);
+            const lines = doc.splitTextToSize(String(b.parsed).toUpperCase(), usableWidth);
+            lines.forEach((line: string) => { thickText(line, leftMargin, y, true); y += lineHeight; });
+            y += lineHeight;
+          } else if (b.type === "transition") {
+            doc.setFont("courier", "normal");
+            doc.setFontSize(12);
+            const text = String(b.parsed).toUpperCase();
+            thickText(text, pageWidth - rightMargin - doc.getTextWidth(text), y);
+            y += lineHeight * 2;
+          } else if (b.type === "dialogue_block") {
+            doc.setFont("courier", "normal");
+            doc.setFontSize(12);
+            const speaker = String(b.parsed.speaker).toUpperCase();
+            thickText(speaker, dialogueColLeft + (dialogueColWidth - doc.getTextWidth(speaker)) / 2, y);
+            y += lineHeight;
+            if (b.parsed.parenthetical) {
+              doc.setFont("courier", "italic");
+              doc.setFontSize(11);
+              const paren = `(${b.parsed.parenthetical})`;
+              doc.splitTextToSize(paren, dialogueColWidth).forEach((line: string) => {
+                thickText(line, dialogueColLeft + (dialogueColWidth - doc.getTextWidth(line)) / 2, y);
+                y += lineHeight;
+              });
+            }
+            doc.setFont("courier", "normal");
+            doc.setFontSize(12);
+            doc.splitTextToSize(String(b.parsed.dialogue), dialogueColWidth).forEach((line: string) => {
+              thickText(line, dialogueColLeft, y);
               y += lineHeight;
             });
+            y += lineHeight;
+          } else if (b.type === "action") {
+            doc.setFont("courier", "normal");
+            doc.setFontSize(12);
+            doc.splitTextToSize(String(b.parsed), usableWidth).forEach((line: string) => {
+              thickText(line, leftMargin, y);
+              y += lineHeight;
+            });
+            y += lineHeight;
           }
-          doc.setFont("courier", "normal");
-          doc.setFontSize(12);
-          doc.splitTextToSize(String(b.parsed.dialogue), dialogueColWidth).forEach((line: string) => {
-            checkPage();
-            thickText(line, dialogueColLeft, y);
-            y += lineHeight;
-          });
-          y += lineHeight;
-        } else if (b.type === "action") {
-          doc.setFont("courier", "normal");
-          doc.setFontSize(12);
-          doc.splitTextToSize(String(b.parsed), usableWidth).forEach((line: string) => {
-            checkPage();
-            thickText(line, leftMargin, y);
-            y += lineHeight;
-          });
-          y += lineHeight;
-        }
+        });
+        // Add a new page unless it's the last one
+        if (pageIdx < pages.length - 1) doc.addPage();
       });
-
       doc.save(`${currentProject.title || "script"}.pdf`);
     } catch (err) {
       console.error("Error exporting PDF:", err);
@@ -562,24 +652,31 @@ export default function App() {
     return JSON.stringify(blks);
   };
 
-  // Auto-save: persist blocks to Supabase whenever they change (debounced)
+  // Auto-save: persist blocks and title to Supabase whenever they change (debounced)
   const autoSaveTimerRef = useRef<any>(null);
+  const lastSavedContentRef = useRef<string>("");
+  const lastSavedTitleRef = useRef<string>("");
   useEffect(() => {
     if (!currentProject || blocks === undefined) return;
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = setTimeout(async () => {
       const content = blocksToContent(blocks);
-      if (content === currentProject.content) return; // no change
+      const title = currentProject.title;
+      const shouldSaveContent = content !== currentProject.content || content !== lastSavedContentRef.current;
+      const shouldSaveTitle = title !== lastSavedTitleRef.current;
+      if (!shouldSaveContent && !shouldSaveTitle) return;
       await supabase
         .from("projects")
-        .update({ content, updated_at: new Date().toISOString() })
+        .update({ content, title, updated_at: new Date().toISOString() })
         .eq("id", currentProject.id);
       // Update local project reference so future comparisons work
-      setCurrentProject(prev => prev ? { ...prev, content } : prev);
-      setProjects(prev => prev.map(p => p.id === currentProject.id ? { ...p, content } : p));
+      setCurrentProject(prev => prev ? { ...prev, content, title } : prev);
+      setProjects(prev => prev.map(p => p.id === currentProject.id ? { ...p, content, title } : p));
+      lastSavedContentRef.current = content;
+      lastSavedTitleRef.current = title;
     }, 1500);
     return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current); };
-  }, [blocks, currentProject?.id]);
+  }, [blocks, currentProject?.title, currentProject?.id]);
 
   const punctuationMap: Record<string, string> = {
     "comma": ",",
@@ -597,12 +694,6 @@ export default function App() {
     "hyphen": "-",
     "open parenthesis": "(",
     "close parenthesis": ")",
-    "open parentheses": "(",
-    "close parentheses": ")",
-    "parentheses open": "(",
-    "parentheses close": ")",
-    "parenthesis open": "(",
-    "parenthesis close": ")",
     "open bracket": "[",
     "close bracket": "]",
     "open brace": "{",
@@ -611,23 +702,10 @@ export default function App() {
     "quote": '"',
     "double quote": '"',
     "slash": "/",
-    "backslash": "\\",
-    "ampersand": "&",
-    "percent": "%",
-    "dollar": "$",
-    "pound": "#",
-    "star": "*",
-    "asterisk": "*",
-    "at sign": "@",
-    "hash": "#",
-    "underscore": "_",
-    "plus": "+",
-    "equals": "=",
-    "less than": "<",
-    "greater than": ">",
   };
 
 function replaceSpokenPunctuation(text: string): string {
+  if (!text) return "";
   let result = text;
   // Replace both "open parenthesis" and "parenthesis open" forms
   for (const [word, symbol] of Object.entries(punctuationMap)) {
@@ -644,12 +722,25 @@ function replaceSpokenPunctuation(text: string): string {
       result = result.replace(regex, symbol);
     }
   }
-  // Remove any space before punctuation
-  result = result.replace(/\s+([^\w\s])/g, '$1');
+  // Remove any space before punctuation (.,!?:; etc.)
+  result = result.replace(/\s+([.,!?:;])/g, '$1');
+  // Handle cases where punctuation might have been joined with a space previously
+  result = result.replace(/([a-zA-Z0-9])\s+([.,!?:;])/g, '$1$2');
+  // Ensure space after punctuation (except if followed by another punctuation or end of string)
+  result = result.replace(/([.,!?:;])([a-zA-Z0-9])/g, '$1 $2');
+  // Remove any double spaces
   result = result.replace(/\s{2,}/g, ' ');
-  // Capitalize first letter after strong punctuation
-  result = result.replace(/([.?!]\s+)([a-z])/g, (_, p1, p2) => p1 + p2.toUpperCase());
-  return result.trim();
+  result = result.trim();
+
+  if (result.length > 0) {
+    // Capitalize first letter of the whole string
+    result = result.charAt(0).toUpperCase() + result.slice(1);
+    // Capitalize first letter after strong punctuation (handles multiple marks and trailing spaces/quotes)
+    result = result.replace(/([.?!]+[\s"')]*)(\w)/g, (match, p1, p2) => p1 + p2.toUpperCase());
+  }
+  // Capitalize standalone "i"
+  result = result.replace(/\bi\b/g, "I");
+  return result;
 }
 
   // Speech Recognition Setup
@@ -681,10 +772,14 @@ function replaceSpokenPunctuation(text: string): string {
         // --- EXACT LOGIC REQUESTED ---
         if (newFinalText) {
           const lowerText = newFinalText.toLowerCase();
-          if (lowerText.includes("next line")) {
-            // Remove "next line" and process immediately
-            const cleanedText = replaceSpokenPunctuation(newFinalText.replace(/next line/gi, "").trim());
-            accumulatedTextRef.current += (accumulatedTextRef.current && cleanedText ? " " : "") + cleanedText;
+          if (lowerText.includes("next line") || lowerText.includes("x line")) {
+            // Remove "next line" or "x line" and process immediately
+            const cleanedText = replaceSpokenPunctuation(newFinalText.replace(/(next line|x line)/gi, "").trim());
+            const startsWithPunct = /^[.,!?:;]/.test(cleanedText);
+            accumulatedTextRef.current += (accumulatedTextRef.current && cleanedText && !startsWithPunct ? " " : "") + cleanedText;
+            
+            // Final cleanup of the accumulated text before processing
+            accumulatedTextRef.current = replaceSpokenPunctuation(accumulatedTextRef.current);
 
             const textToProcess = accumulatedTextRef.current;
             if (textToProcess.trim()) {
@@ -698,8 +793,10 @@ function replaceSpokenPunctuation(text: string): string {
             }
           }
 
-          const startsWithPunct = /^[^\w\s]/.test(newFinalText);
+          const startsWithPunct = /^[.,!?:;]/.test(newFinalText);
           accumulatedTextRef.current += (accumulatedTextRef.current && !startsWithPunct ? " " : "") + newFinalText;
+          // Final cleanup to ensure no spaces before punctuation across joins
+          accumulatedTextRef.current = replaceSpokenPunctuation(accumulatedTextRef.current);
           setAccumulatedTranscript(accumulatedTextRef.current);
         }
 
@@ -788,16 +885,17 @@ function replaceSpokenPunctuation(text: string): string {
   const processSpeech = (text: string) => {
     if (!text.trim()) return;
     const data = parseNLP(text.trim(), characters, lastSpeakerRef.current);
-    // If this is a dialogue continuation, update speaker
+    // If this is a dialogue continuation, update speaker (add CONT’D if not already present)
     if (data.type === "dialogue_block") {
-      if (data.isContinued && data.parsed.speaker) {
+      if (data.isContinued && data.parsed.speaker && !/\(CONT’D\)$/i.test(data.parsed.speaker)) {
         data.parsed.speaker = `${data.parsed.speaker} (CONT’D)`;
       }
+      // Always update lastSpeakerRef to the canonical speaker name (without CONT’D)
       lastSpeakerRef.current = data.parsed.speaker.replace(/ \(CONT’D\)$/i, "");
     } else {
       lastSpeakerRef.current = null;
     }
-    
+
     updateBlocks((prev) => {
       const newBlocks = [...prev];
       const index = insertionIndex !== null ? insertionIndex : prev.length;
@@ -845,11 +943,24 @@ function replaceSpokenPunctuation(text: string): string {
             newBlocks.splice(index, 1);
             updateBlocks(newBlocks);
           }}
-          className="absolute -left-8 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 transition-opacity"
+          className="absolute -right-12 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 transition-opacity p-2 text-xl"
           title="Delete block"
         >
           ×
         </button>
+        {block.type === "act_header" && (
+          <div
+            contentEditable
+            suppressContentEditableWarning
+            onBlur={(e) => {
+              const val = e.currentTarget.innerText.trim();
+              if (val !== block.parsed) updateBlockParsed(val);
+            }}
+            className="uppercase my-2 text-black font-bold text-center underline outline-none focus:bg-stone-100 px-1 rounded transition-colors cursor-text"
+          >
+            {block.parsed}
+          </div>
+        )}
         {block.type === "scene_heading" && (
           <div 
             contentEditable
@@ -858,7 +969,7 @@ function replaceSpokenPunctuation(text: string): string {
               const val = e.currentTarget.innerText.trim();
               if (val !== block.parsed) updateBlockParsed(val);
             }}
-            className="uppercase mt-2 mb-2 text-black font-bold outline-none focus:bg-stone-100 px-1 rounded transition-colors cursor-text"
+            className="uppercase my-2 text-black font-bold outline-none focus:bg-stone-100 px-1 rounded transition-colors cursor-text"
           >
             {block.parsed}
           </div>
@@ -871,13 +982,13 @@ function replaceSpokenPunctuation(text: string): string {
               const val = e.currentTarget.innerText.trim();
               if (val !== block.parsed) updateBlockParsed(val);
             }}
-            className="uppercase text-right mt-2 mb-1 text-black outline-none focus:bg-stone-100 px-1 rounded transition-colors cursor-text"
+            className="uppercase text-right my-2 text-black outline-none focus:bg-stone-100 px-1 rounded transition-colors cursor-text"
           >
             {block.parsed}
           </div>
         )}
         {block.type === "dialogue_block" && (
-          <div className="my-2 w-full flex flex-col items-center">
+          <div className="mt-2 mb-2 w-full flex flex-col items-center">
             <div className="w-3/5">
               <div className="group/line relative uppercase text-black text-center leading-tight">
                 <div
@@ -902,15 +1013,6 @@ function replaceSpokenPunctuation(text: string): string {
                     title="Add parenthetical"
                   >(+)</button>
                 )}
-                <button
-                  onClick={() => {
-                    const newBlocks = [...blocks];
-                    newBlocks.splice(index, 1);
-                    updateBlocks(newBlocks);
-                  }}
-                  className="absolute -right-6 top-1/2 -translate-y-1/2 opacity-0 group-hover/line:opacity-100 text-red-400 hover:text-red-600 transition-opacity text-xs"
-                  title="Delete block"
-                >×</button>
               </div>
               {block.parsed.parenthetical && (
                 <div className="group/line relative text-black italic text-center leading-tight">
@@ -952,15 +1054,6 @@ function replaceSpokenPunctuation(text: string): string {
                 >
                   {block.parsed.dialogue}
                 </div>
-                <button
-                  onClick={() => {
-                    const newBlocks = [...blocks];
-                    newBlocks.splice(index, 1);
-                    updateBlocks(newBlocks);
-                  }}
-                  className="absolute -right-6 top-1/2 -translate-y-1/2 opacity-0 group-hover/line:opacity-100 text-red-400 hover:text-red-600 transition-opacity text-xs"
-                  title="Delete block"
-                >×</button>
               </div>
             </div>
           </div>
@@ -1069,14 +1162,22 @@ function replaceSpokenPunctuation(text: string): string {
               <li key={p.id} className="group relative">
                 <button
                   onClick={async () => {
-                    // Flush current project content before switching
-                    if (currentProject && currentProject.id !== p.id) {
-                      const content = blocksToContent(blocks);
-                      if (content !== currentProject.content) {
+                    // Flush pending autosave before switching
+                    if (autoSaveTimerRef.current) {
+                      clearTimeout(autoSaveTimerRef.current);
+                      autoSaveTimerRef.current = null;
+                      // Manually trigger immediate save
+                      if (currentProject && blocks !== undefined) {
+                        const content = blocksToContent(blocks);
+                        const title = currentProject.title;
                         await supabase
                           .from("projects")
-                          .update({ content, updated_at: new Date().toISOString() })
+                          .update({ content, title, updated_at: new Date().toISOString() })
                           .eq("id", currentProject.id);
+                        setCurrentProject(prev => prev ? { ...prev, content, title } : prev);
+                        setProjects(prev => prev.map(prj => prj.id === currentProject.id ? { ...prj, content, title } : prj));
+                        lastSavedContentRef.current = content;
+                        lastSavedTitleRef.current = title;
                       }
                     }
                     setCurrentProject(p);
@@ -1085,7 +1186,7 @@ function replaceSpokenPunctuation(text: string): string {
                     setFuture([]);
                     setActiveTab("editor");
                   }}
-                  className={`w-full text-left px-3 py-2 rounded text-sm flex items-center gap-2 ${
+                  className={`w-full text-left px-3 py-2 pr-10 rounded text-sm flex items-center gap-2 ${
                     currentProject?.id === p.id ? "bg-stone-200 font-medium" : "hover:bg-stone-200/50"
                   }`}
                 >
@@ -1151,7 +1252,7 @@ function replaceSpokenPunctuation(text: string): string {
       {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
-        <header className="h-14 border-b border-stone-200 bg-white flex items-center justify-between px-6">
+        <header className="h-20 border-b border-stone-200 bg-white flex items-center justify-between px-6">
           {activeTab === "editor" && currentProject ? (
             <input
               type="text"
@@ -1266,82 +1367,138 @@ function replaceSpokenPunctuation(text: string): string {
         </header>
 
         {/* Workspace */}
-        <main className="flex-1 overflow-y-auto bg-stone-50 p-8 flex justify-center">
+        <main className="flex-1 overflow-y-auto bg-stone-200 p-8 flex flex-col items-center">
           {activeTab === "editor" ? (
-            <div id="script-content" className="w-full max-w-3xl bg-white shadow-sm border border-stone-200 min-h-full p-12 font-mono text-base leading-relaxed text-stone-950 subpixel-antialiased">
+            <div id="script-content" className="w-full flex flex-col items-center">
               {blocks.length === 0 ? (
-                <div className="text-stone-400 text-center mt-20 italic">
-                  Start dictating to write your script...
-                  <br />
-                  Try saying: "Scene heading interior kitchen day"
-                  <br />
-                  Or: "Emilio says Cassandra what did you do"
-                </div>
+                <Page pageNumber={1}>
+                  <div className="relative h-full flex flex-col">
+                    <InsertionBar 
+                      index={0} 
+                      onInsert={insertTemplate} 
+                      onStartDictation={toggleListening}
+                      isListeningAtThisIndex={isListening && insertionIndex === 0}
+                      accumulatedTranscript={accumulatedTranscript}
+                      transcript={transcript}
+                      secondsLeft={secondsLeft}
+                    />
+
+                    {isListening && insertionIndex === null && (
+                      <div className="mt-4 text-stone-400 italic flex flex-col gap-1">
+                        <div className="flex items-center gap-2">
+                          <span className="relative flex h-3 w-3">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                          </span>
+                          <span className="text-stone-600">{accumulatedTranscript}</span>
+                          {secondsLeft > 0 && (
+                            <span className="text-[10px] bg-stone-100 text-stone-400 px-1.5 py-0.5 rounded-full font-sans not-italic">
+                              Processing in {secondsLeft}s...
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-stone-400">{transcript || (!accumulatedTranscript ? "Listening..." : "")}</span>
+                      </div>
+                    )}
+                    
+                    <div className="mt-4">
+                      {!isListening && (
+                        <div className="text-stone-400 text-center mt-20 mb-8 italic font-mono">
+                          Start dictating to write your script...
+                          <br />
+                          Try saying: "Scene heading interior kitchen day"
+                          <br />
+                          Or: "Emilio says Cassandra what did you do"
+                        </div>
+                      )}
+
+                      <form onSubmit={handleManualSubmit} className="flex gap-2">
+                        <input
+                          type="text"
+                          value={manualInput}
+                          onChange={(e) => setManualInput(e.target.value)}
+                          placeholder="Type a scene heading, action, or dialogue..."
+                          className="flex-1 bg-stone-50 border border-stone-200 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-sans text-sm"
+                        />
+                        <button
+                          type="submit"
+                          className="px-4 py-2 bg-stone-900 text-white rounded-lg hover:bg-stone-800 font-medium font-sans text-sm"
+                        >
+                          Add
+                        </button>
+                      </form>
+                    </div>
+                  </div>
+                </Page>
               ) : (
                 <>
-                  {blocks.map((block, i) => (
-                    <React.Fragment key={i}>
-                      <InsertionBar 
-                        index={i} 
-                        onInsert={insertTemplate} 
-                        onStartDictation={toggleListening}
-                        isListeningAtThisIndex={isListening && insertionIndex === i}
-                        accumulatedTranscript={accumulatedTranscript}
-                        transcript={transcript}
-                        secondsLeft={secondsLeft}
-                        onHoverChange={setHoveredGap}
-                      />
-                      <div style={{ transform: hoveredGap === i ? 'translateY(2px)' : hoveredGap === i + 1 ? 'translateY(-2px)' : 'none', transition: 'transform 0.15s ease' }}>
-                        {renderBlock(block, i)}
-                      </div>
-                    </React.Fragment>
+                  {paginateBlocks(blocks).map((page, pageIdx) => (
+                    <Page key={pageIdx} pageNumber={pageIdx + 1}>
+                      {page.blocks.map(({ block, index }, i) => (
+                        <React.Fragment key={index}>
+                          <InsertionBar 
+                            index={index} 
+                            onInsert={insertTemplate} 
+                            onStartDictation={toggleListening}
+                            isListeningAtThisIndex={isListening && insertionIndex === index}
+                            accumulatedTranscript={accumulatedTranscript}
+                            transcript={transcript}
+                            secondsLeft={secondsLeft}
+                          />
+                          {renderBlock(block, index)}
+                        </React.Fragment>
+                      ))}
+                      {pageIdx === paginateBlocks(blocks).length - 1 && (
+                        <div className="mt-2">
+                          <InsertionBar 
+                            index={blocks.length} 
+                            onInsert={insertTemplate} 
+                            onStartDictation={toggleListening}
+                            isListeningAtThisIndex={isListening && insertionIndex === blocks.length}
+                            accumulatedTranscript={accumulatedTranscript}
+                            transcript={transcript}
+                            secondsLeft={secondsLeft}
+                          />
+
+                          {isListening && insertionIndex === null && (
+                            <div className="mt-4 text-stone-400 italic flex flex-col gap-1">
+                              <div className="flex items-center gap-2">
+                                <span className="relative flex h-3 w-3">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                  <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                                </span>
+                                <span className="text-stone-600">{accumulatedTranscript}</span>
+                                {secondsLeft > 0 && (
+                                  <span className="text-[10px] bg-stone-100 text-stone-400 px-1.5 py-0.5 rounded-full font-sans not-italic">
+                                    Processing in {secondsLeft}s...
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-stone-400">{transcript || (!accumulatedTranscript ? "Listening..." : "")}</span>
+                            </div>
+                          )}
+                          
+                          <form onSubmit={handleManualSubmit} className="mt-8 pt-4 border-t border-stone-100 flex gap-2">
+                            <input
+                              type="text"
+                              value={manualInput}
+                              onChange={(e) => setManualInput(e.target.value)}
+                              placeholder="Type a scene heading, action, or dialogue..."
+                              className="flex-1 bg-stone-50 border border-stone-200 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-sans text-sm"
+                            />
+                            <button
+                              type="submit"
+                              className="px-4 py-2 bg-stone-900 text-white rounded-lg hover:bg-stone-800 font-medium font-sans text-sm"
+                            >
+                              Add
+                            </button>
+                          </form>
+                        </div>
+                      )}
+                    </Page>
                   ))}
-                  <InsertionBar 
-                    index={blocks.length} 
-                    onInsert={insertTemplate} 
-                    onStartDictation={toggleListening}
-                    isListeningAtThisIndex={isListening && insertionIndex === blocks.length}
-                    accumulatedTranscript={accumulatedTranscript}
-                    transcript={transcript}
-                    secondsLeft={secondsLeft}
-                    onHoverChange={setHoveredGap}
-                  />
                 </>
               )}
-              
-              {isListening && insertionIndex === null && (
-                <div className="mt-4 text-stone-400 italic flex flex-col gap-1">
-                  <div className="flex items-center gap-2">
-                    <span className="relative flex h-3 w-3">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
-                    </span>
-                    <span className="text-stone-600">{accumulatedTranscript}</span>
-                    {secondsLeft > 0 && (
-                      <span className="text-[10px] bg-stone-100 text-stone-400 px-1.5 py-0.5 rounded-full font-sans not-italic">
-                        Processing in {secondsLeft}s...
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-stone-400">{transcript || (!accumulatedTranscript ? "Listening..." : "")}</span>
-                </div>
-              )}
-              
-              <form onSubmit={handleManualSubmit} className="mt-8 pt-4 border-t border-stone-100 flex gap-2">
-                <input
-                  type="text"
-                  value={manualInput}
-                  onChange={(e) => setManualInput(e.target.value)}
-                  placeholder="Type a scene heading, action, or dialogue..."
-                  className="flex-1 bg-stone-50 border border-stone-200 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-sans text-sm"
-                />
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-stone-900 text-white rounded-lg hover:bg-stone-800 font-medium font-sans text-sm"
-                >
-                  Add
-                </button>
-              </form>
             </div>
           ) : (
             <div className="w-full max-w-3xl">

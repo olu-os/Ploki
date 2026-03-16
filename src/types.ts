@@ -14,7 +14,7 @@ export interface Character {
 }
 
 export interface ParsedBlock {
-  type: "action" | "scene_heading" | "transition" | "dialogue_block";
+  type: "action" | "scene_heading" | "transition" | "dialogue_block" | "act_header";
   original: string;
   parsed: any;
 }
