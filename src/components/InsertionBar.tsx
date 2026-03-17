@@ -36,10 +36,12 @@ export const InsertionBar: React.FC<InsertionBarProps> = ({
   }, []);
 
   return (
-    <div className={`group/bar relative h-6 flex flex-col items-center justify-center -my-3 transition-all ${showMenu ? 'z-50' : 'z-10'}`}>
-      <div className={`w-full h-[1px] bg-stone-200 transition-opacity ${showMenu ? 'opacity-100' : 'opacity-0 group-hover/bar:opacity-100'}`} />
+    <div className={`group/bar relative flex flex-col items-center transition-all ${showMenu ? 'z-50' : 'z-10'} ${
+      isListeningAtThisIndex ? "my-8 min-h-[3rem]" : "h-6 justify-center -my-3"
+    }`}>
+      <div className={`w-full h-[1px] bg-stone-200 transition-opacity ${showMenu || isListeningAtThisIndex ? 'opacity-100' : 'opacity-0 group-hover/bar:opacity-100'}`} />
       
-      <div className={`absolute -left-8 flex items-center transition-opacity ${showMenu ? 'opacity-100' : 'opacity-0 group-hover/bar:opacity-100'}`} ref={menuRef}>
+      <div className={`absolute -left-8 flex items-center transition-opacity ${showMenu || isListeningAtThisIndex ? 'opacity-100' : 'opacity-0 group-hover/bar:opacity-100'}`} ref={menuRef}>
         <button 
           onClick={() => setShowMenu(!showMenu)}
           className="p-1 bg-white border border-stone-200 rounded-full shadow-sm hover:bg-stone-50 text-stone-400 hover:text-stone-600"
@@ -87,33 +89,40 @@ export const InsertionBar: React.FC<InsertionBarProps> = ({
       </div>
 
       {isListeningAtThisIndex && (
-        <div className="w-full py-2 mt-8">
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center gap-3">
-              <span className="relative flex h-2 w-2 shrink-0">
+        <div className="w-full py-4">
+          <div className="flex flex-col gap-2">
+            <div className="flex items-start gap-3">
+              <span className="relative flex h-2 w-2 shrink-0 mt-2">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
               </span>
-              <input
-                type="text"
+              <textarea
                 value={accumulatedTranscript}
                 onChange={(e) => onAccumulatedTranscriptChange(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
                     onStartDictation(index);
                   }
                 }}
                 placeholder="Listening..."
-                className="text-black font-mono text-[12pt] bg-transparent border-none focus:ring-0 outline-none w-full p-0"
+                className="text-black font-mono text-[12pt] bg-transparent border-none focus:ring-0 outline-none w-full p-0 resize-none overflow-hidden min-h-[1.5em] leading-relaxed"
                 autoFocus
+                rows={1}
+                ref={(el) => {
+                  if (el) {
+                    el.style.height = '0px';
+                    el.style.height = el.scrollHeight + 'px';
+                  }
+                }}
               />
             </div>
-            {transcript && <span className="text-stone-400 font-mono text-[10pt] italic ml-5">{transcript}</span>}
+            {transcript && <div className="text-stone-400 font-mono text-[10pt] italic ml-5 whitespace-pre-wrap break-words leading-relaxed">{transcript}</div>}
           </div>
         </div>
       )}
 
-      <div className="absolute -right-8 opacity-0 group-hover/bar:opacity-100 transition-opacity">
+      <div className={`absolute -right-8 transition-opacity ${isListeningAtThisIndex ? 'opacity-100' : 'opacity-0 group-hover/bar:opacity-100'}`}>
         <button 
           onClick={() => onStartDictation(index)}
           className={`p-1 rounded-full shadow-sm border transition-colors ${

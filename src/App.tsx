@@ -372,8 +372,8 @@ export default function App() {
 
       if (newFinalText) {
         const lowerText = newFinalText.toLowerCase();
-        if (lowerText.includes("next line") || lowerText.includes("x line")) {
-          const cleanedText = replaceSpokenPunctuation(newFinalText.replace(/(next line|x line)/gi, "").trim());
+        if (lowerText.includes("next line") || lowerText.includes("x line") || lowerText.includes("next slide") || lowerText.includes("x slide") || lowerText.includes("next lie") || lowerText.includes("x lie")) {
+          const cleanedText = replaceSpokenPunctuation(newFinalText.replace(/(next line|x line|next slide|x slide|next lie|x lie)/gi, "").trim());
           const startsWithPunct = /^[.,!?:;]/.test(cleanedText);
           accumulatedTextRef.current += (accumulatedTextRef.current && cleanedText && !startsWithPunct ? " " : "") + cleanedText;
           accumulatedTextRef.current = replaceSpokenPunctuation(accumulatedTextRef.current);
