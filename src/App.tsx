@@ -139,6 +139,7 @@ const InsertionBar = ({
   isListeningAtThisIndex,
   accumulatedTranscript,
   transcript,
+  onAccumulatedTranscriptChange,
   secondsLeft
 }: { 
   index: number, 
@@ -147,6 +148,7 @@ const InsertionBar = ({
   isListeningAtThisIndex: boolean,
   accumulatedTranscript: string,
   transcript: string,
+  onAccumulatedTranscriptChange: (text: string) => void,
   secondsLeft: number
 }) => {
   const [showMenu, setShowMenu] = useState(false);
@@ -214,18 +216,28 @@ const InsertionBar = ({
       </div>
 
       {isListeningAtThisIndex && (
-        <div className="w-full flex justify-center py-4">
-          <div className="bg-white border border-emerald-100 shadow-sm rounded-lg px-4 py-2 flex items-center gap-3 z-50 max-w-lg">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-            </span>
-            <div className="flex flex-col">
-              <div className="flex items-center gap-2">
-                <span className="text-stone-800 text-xs font-medium">{accumulatedTranscript || "Listening..."}</span>
-              </div>
-              {transcript && <span className="text-stone-400 text-[10px] italic">{transcript}</span>}
+        <div className="w-full py-2 mt-8">
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-3">
+              <span className="relative flex h-2 w-2 shrink-0">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+              <input
+                type="text"
+                value={accumulatedTranscript}
+                onChange={(e) => onAccumulatedTranscriptChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    onStartDictation(index);
+                  }
+                }}
+                placeholder="Listening..."
+                className="text-black font-mono text-[12pt] bg-transparent border-none focus:ring-0 outline-none w-full p-0"
+                autoFocus
+              />
             </div>
+            {transcript && <span className="text-stone-400 font-mono text-[10pt] italic ml-5">{transcript}</span>}
           </div>
         </div>
       )}
@@ -1015,10 +1027,15 @@ function replaceSpokenPunctuation(text: string, capitalize = true): string {
     };
   }, []);
 
+  const handleAccumulatedTranscriptChange = (text: string) => {
+    setAccumulatedTranscript(text);
+    accumulatedTextRef.current = text;
+  };
+
   const toggleListening = (index?: number) => {
     if (isListening) {
-      // If clicking a different mic button while already listening, just change the index
       if (index !== undefined && index !== insertionIndex) {
+        // If clicking a different mic button while already listening, just change the index
         setInsertionIndex(index);
         return;
       }
@@ -1036,7 +1053,8 @@ function replaceSpokenPunctuation(text: string, capitalize = true): string {
       if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
       setInsertionIndex(null);
     } else {
-      setInsertionIndex(index !== undefined ? index : null);
+      // Default to the end of the script if no index provided
+      setInsertionIndex(index !== undefined ? index : blocks.length);
       try {
         recognitionRef.current?.start();
         isListeningRef.current = true;
@@ -1621,21 +1639,9 @@ function replaceSpokenPunctuation(text: string, capitalize = true): string {
                       isListeningAtThisIndex={isListening && insertionIndex === 0}
                       accumulatedTranscript={accumulatedTranscript}
                       transcript={transcript}
+                      onAccumulatedTranscriptChange={handleAccumulatedTranscriptChange}
                       secondsLeft={secondsLeft}
                     />
-
-                    {isListening && insertionIndex === null && (
-                      <div className="mt-4 text-stone-400 italic flex flex-col gap-1">
-                        <div className="flex items-center gap-2">
-                          <span className="relative flex h-3 w-3">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
-                          </span>
-                          <span className="text-stone-600">{accumulatedTranscript}</span>
-                        </div>
-                        <span className="text-stone-400">{transcript || (!accumulatedTranscript ? "Listening..." : "")}</span>
-                      </div>
-                    )}
                     
                     <div className="mt-4">
                       {!isListening && (
@@ -1679,6 +1685,7 @@ function replaceSpokenPunctuation(text: string, capitalize = true): string {
                             isListeningAtThisIndex={isListening && insertionIndex === index}
                             accumulatedTranscript={accumulatedTranscript}
                             transcript={transcript}
+                            onAccumulatedTranscriptChange={handleAccumulatedTranscriptChange}
                             secondsLeft={secondsLeft}
                           />
                           {renderBlock(block, index)}
@@ -1693,21 +1700,9 @@ function replaceSpokenPunctuation(text: string, capitalize = true): string {
                             isListeningAtThisIndex={isListening && insertionIndex === blocks.length}
                             accumulatedTranscript={accumulatedTranscript}
                             transcript={transcript}
+                            onAccumulatedTranscriptChange={handleAccumulatedTranscriptChange}
                             secondsLeft={secondsLeft}
                           />
-
-                          {isListening && insertionIndex === null && (
-                            <div className="mt-4 text-stone-400 italic flex flex-col gap-1">
-                              <div className="flex items-center gap-2">
-                                <span className="relative flex h-3 w-3">
-                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                  <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
-                                </span>
-                                <span className="text-stone-600">{accumulatedTranscript}</span>
-                              </div>
-                              <span className="text-stone-400">{transcript || (!accumulatedTranscript ? "Listening..." : "")}</span>
-                            </div>
-                          )}
                           
                           <form onSubmit={handleManualSubmit} className="mt-8 pt-4 border-t border-stone-100 flex gap-2">
                             <input
