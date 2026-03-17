@@ -2,36 +2,69 @@ import React, { useState, useEffect, useRef } from "react";
 import { Mic, MicOff, Save, FileText, Settings, Users, Plus, Play, Pause, Download, Undo, Redo, LogOut, History } from "lucide-react";
 import { motion } from "motion/react";
 import jsPDF from "jspdf";
-import { Project, Character, ParsedBlock, ProjectVersion } from "./types";
+import { Project, Character, ParsedBlock, ProjectVersion, TitlePageData } from "./types";
 import { supabase } from "./lib/supabase";
 
 // CONT’D logic: pass lastSpeaker and set isContinued if needed
 function parseNLP(text: string, characters: Character[], lastSpeaker: string | null): ParsedBlock & { isContinued?: boolean } {
-  let parsedText: any = text;
+  let processedText = text;
+
+  // Replace character aliases and names with canonical names throughout the text
+  if (characters && characters.length > 0) {
+    // Sort all patterns by length descending to handle overlapping names correctly
+    const allMappings: { pattern: string, replacement: string }[] = [];
+    characters.forEach(char => {
+      const aliases = char.aliases ? char.aliases.split(',').map(a => a.trim()).filter(Boolean) : [];
+      aliases.forEach(alias => {
+        allMappings.push({ pattern: alias, replacement: char.canonical_name });
+      });
+      // Also include the canonical name itself to ensure consistent casing
+      allMappings.push({ pattern: char.canonical_name, replacement: char.canonical_name });
+    });
+    
+    allMappings.sort((a, b) => b.pattern.length - a.pattern.length);
+    
+    const processedPatterns = new Set<string>();
+    for (const mapping of allMappings) {
+      const lowerPattern = mapping.pattern.toLowerCase();
+      if (processedPatterns.has(lowerPattern)) continue;
+      processedPatterns.add(lowerPattern);
+      
+      try {
+        // Use word boundaries and case-insensitive matching
+        const regex = new RegExp(`\\b${mapping.pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, "gi");
+        processedText = processedText.replace(regex, mapping.replacement);
+      } catch (e) {
+        console.error("Regex error for pattern:", mapping.pattern, e);
+      }
+    }
+  }
+
+  let parsedText: any = processedText;
   let type: ParsedBlock["type"] = "action";
   let isContinued = false;
-  const lowerText = text.toLowerCase();
+  const lowerText = processedText.toLowerCase();
   // Accept both 'scene heading' and 'seen heading' (common mishearing)
-  const sceneHeadingMatch = text.match(/^(scene|seen) heading:?:?\s*(.+)/i);
+  const sceneHeadingMatch = processedText.match(/^(scene|seen) heading:?:?\s*(.+)/i);
   if (sceneHeadingMatch) {
     type = "scene_heading";
     parsedText = sceneHeadingMatch[2].trim().toUpperCase();
     parsedText = parsedText.replace(/exterior/i, "EXT.").replace(/interior/i, "INT.");
   } else if (lowerText.startsWith("new scene") || lowerText.startsWith("new seen")) {
     type = "scene_heading";
-    parsedText = text.replace(/^new (scene|seen),?\s*/i, "").toUpperCase();
+    parsedText = processedText.replace(/^new (scene|seen),?\s*/i, "").toUpperCase();
     parsedText = parsedText.replace(/exterior/i, "EXT.").replace(/interior/i, "INT.");
   } else if (lowerText.startsWith("cut to") || lowerText.startsWith("fade out")) {
     type = "transition";
-    parsedText = text.toUpperCase() + ":";
-  } else if (/^act\s+(one|two|three|four|five|\d+)$/i.test(text.trim())) {
+    parsedText = processedText.toUpperCase() + ":";
+  } else if (/^act\s+(one|two|three|four|five|\d+)$/i.test(processedText.trim())) {
     type = "act_header";
-    parsedText = text.trim().toUpperCase();
+    parsedText = processedText.trim().toUpperCase();
   } else {
     // Extract para...para from anywhere in the full text before dialogue parsing
     let preExtractedParenthetical = "";
-    let cleanedText = text;
-    const preParaMatch = text.match(/^(.*?)\s*(?:para|power|parenthetical)\s+(.+?)\s+(?:para|power|parenthetical)\s*(.*?)$/i);
+    let cleanedText = processedText;
+    const preParaMatch = processedText.match(/^(.*?)\s*(?:para|power|parenthetical)\s+(.+?)\s+(?:para|power|parenthetical)\s*(.*?)$/i);
     if (preParaMatch) {
       preExtractedParenthetical = preParaMatch[2].trim();
       const before = preParaMatch[1].trim();
@@ -51,7 +84,7 @@ function parseNLP(text: string, characters: Character[], lastSpeaker: string | n
       if ((action === "continues" || action === "goes on") && lastSpeaker && speaker.toUpperCase() === lastSpeaker.toUpperCase()) {
         isContd = true;
       }
-      // Alias lookup
+      // Alias lookup (already partially handled by global replace, but good for safety)
       const charMatch = characters.find(c =>
         c.canonical_name.toLowerCase() === speaker.toLowerCase() ||
         (c.aliases && c.aliases.toLowerCase().split(',').map(a => a.trim()).includes(speaker.toLowerCase()))
@@ -92,7 +125,7 @@ function parseNLP(text: string, characters: Character[], lastSpeaker: string | n
     } else {
       // Action: capitalize first letter
       type = "action";
-      parsedText = text.charAt(0).toUpperCase() + text.slice(1);
+      parsedText = processedText.charAt(0).toUpperCase() + processedText.slice(1);
     }
   }
   return { type, parsed: parsedText, original: text, isContinued };
@@ -190,11 +223,6 @@ const InsertionBar = ({
             <div className="flex flex-col">
               <div className="flex items-center gap-2">
                 <span className="text-stone-800 text-xs font-medium">{accumulatedTranscript || "Listening..."}</span>
-                {secondsLeft > 0 && (
-                  <span className="text-[9px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-full font-sans">
-                    {secondsLeft}s
-                  </span>
-                )}
               </div>
               {transcript && <span className="text-stone-400 text-[10px] italic">{transcript}</span>}
             </div>
@@ -282,11 +310,20 @@ export default function App() {
   const accumulatedTextRef = useRef("");
   const isListeningRef = useRef(false);
   const recognitionRef = useRef<any>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioStreamRef = useRef<MediaStream | null>(null);
+  const deepgramConnectionRef = useRef<any>(null);
+  // Stable ref so the Deepgram effect can always call the latest processSpeech
+  const processSpeechRef = useRef<(text: string) => void>(() => {});
+  // Stable ref so the Deepgram effect always sees the latest characters for keyterms
+  const charactersRef = useRef<Character[]>([]);
   const [blocks, setBlocks] = useState<ParsedBlock[]>([]);
   const [history, setHistory] = useState<ParsedBlock[][]>([]);
   const [future, setFuture] = useState<ParsedBlock[][]>([]);
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [versions, setVersions] = useState<ProjectVersion[]>([]);
+  const [titlePage, setTitlePage] = useState<TitlePageData | null>(null);
+  const [showTitlePage, setShowTitlePage] = useState(false);
   const [loadingVersions, setLoadingVersions] = useState(false);
 
   const updateBlocks = (newBlocks: ParsedBlock[] | ((prev: ParsedBlock[]) => ParsedBlock[])) => {
@@ -422,6 +459,22 @@ export default function App() {
     };
 
     let output = "";
+
+    // Title page (only if user created one)
+    if (showTitlePage && titlePage) {
+      const TITLE_LINES_TOP = 22; // blank lines before title (~1/3 down a 66-line page)
+      output += "\n".repeat(TITLE_LINES_TOP);
+      output += center(titlePage.title.toUpperCase()) + "\n";
+      if (titlePage.subtitle) output += center(titlePage.subtitle) + "\n";
+      output += "\n" + center("Written by") + "\n";
+      if (titlePage.author) output += center(titlePage.author) + "\n";
+      const TITLE_LINES_BOTTOM = 22;
+      output += "\n".repeat(TITLE_LINES_BOTTOM);
+      if (titlePage.agencyName) output += titlePage.agencyName + "\n";
+      if (titlePage.agencyAddress) output += titlePage.agencyAddress + "\n";
+      output += "\f"; // form feed = page break
+    }
+
     blocks.forEach(b => {
       if (b.type === "act_header") {
         output += center(String(b.parsed).toUpperCase()) + "\n\n";
@@ -472,6 +525,39 @@ export default function App() {
           doc.text(text, x + 0.25, yPos);
         }
       };
+
+      // Title page (only if user created one)
+      if (showTitlePage && titlePage) {
+        doc.setFontSize(12);
+        const centerX = (x: number) => pageWidth / 2 - x / 2;
+        const titleText = (titlePage.title || "").toUpperCase();
+        const titleY = pageHeight / 2 - 40;
+        // Bold + underline for title (bold uses single draw like rest of script)
+        doc.setFont("courier", "bold");
+        const titleW = doc.getTextWidth(titleText);
+        thickText(titleText, centerX(titleW), titleY, true);
+        doc.setLineWidth(0.75);
+        doc.line(centerX(titleW), titleY + 2, centerX(titleW) + titleW, titleY + 2);
+        let ty = titleY + lineHeight * 2;
+        doc.setFont("courier", "normal");
+        if (titlePage.subtitle) {
+          const sw = doc.getTextWidth(titlePage.subtitle);
+          thickText(titlePage.subtitle, centerX(sw), ty);
+          ty += lineHeight;
+        }
+        ty += lineHeight;
+        const wbText = "Written by";
+        thickText(wbText, centerX(doc.getTextWidth(wbText)), ty);
+        ty += lineHeight;
+        if (titlePage.author) {
+          thickText(titlePage.author, centerX(doc.getTextWidth(titlePage.author)), ty);
+        }
+        // Agency info bottom-left
+        let ay = pageHeight - 108; // ~1.5" from bottom
+        if (titlePage.agencyName) { thickText(titlePage.agencyName, leftMargin, ay); ay += lineHeight; }
+        if (titlePage.agencyAddress) { thickText(titlePage.agencyAddress, leftMargin, ay); }
+        doc.addPage();
+      }
 
       // Use paginateBlocks to split blocks into pages
       const pages = paginateBlocks(blocks);
@@ -557,6 +643,9 @@ export default function App() {
       setCurrentProject(prev => {
         if (!prev) {
           parseContentToBlocks(projects[0].content);
+          const tp = projects[0].title_page ?? null;
+          setTitlePage(tp);
+          setShowTitlePage(!!tp);
           return projects[0];
         }
         return prev;
@@ -571,6 +660,7 @@ export default function App() {
       .order("canonical_name");
     if (error) { console.error(error); return; }
     setCharacters(data || []);
+    charactersRef.current = data || [];
   };
 
   const createProject = async () => {
@@ -583,6 +673,8 @@ export default function App() {
     setProjects(prev => [data, ...prev]);
     setCurrentProject(data);
     setBlocks([]);
+    setTitlePage(null);
+    setShowTitlePage(false);
   };
 
   const saveProject = async () => {
@@ -591,7 +683,7 @@ export default function App() {
     const content = blocksToContent(blocks);
     await supabase
       .from("projects")
-      .update({ title: currentProject.title, content, updated_at: new Date().toISOString() })
+      .update({ title: currentProject.title, content, title_page: titlePage, updated_at: new Date().toISOString() })
       .eq("id", currentProject.id);
     await supabase
       .from("project_versions")
@@ -668,7 +760,13 @@ export default function App() {
     }
     try {
       const parsed = JSON.parse(content);
-      setBlocks(parsed);
+      if (Array.isArray(parsed)) {
+        setBlocks(parsed);
+      } else if (parsed && Array.isArray(parsed.blocks)) {
+        setBlocks(parsed.blocks);
+      } else {
+        setBlocks([]);
+      }
     } catch (e) {
       // Fallback for raw text
       setBlocks([{ type: "action", original: content, parsed: content }]);
@@ -694,16 +792,16 @@ export default function App() {
       if (!shouldSaveContent && !shouldSaveTitle) return;
       await supabase
         .from("projects")
-        .update({ content, title, updated_at: new Date().toISOString() })
+        .update({ content, title, title_page: titlePage, updated_at: new Date().toISOString() })
         .eq("id", currentProject.id);
       // Update local project reference so future comparisons work
-      setCurrentProject(prev => prev ? { ...prev, content, title } : prev);
-      setProjects(prev => prev.map(p => p.id === currentProject.id ? { ...p, content, title } : p));
+      setCurrentProject(prev => prev ? { ...prev, content, title, title_page: titlePage } : prev);
+      setProjects(prev => prev.map(p => p.id === currentProject.id ? { ...p, content, title, title_page: titlePage } : p));
       lastSavedContentRef.current = content;
       lastSavedTitleRef.current = title;
     }, 1500);
     return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current); };
-  }, [blocks, currentProject?.title, currentProject?.id]);
+  }, [blocks, currentProject?.title, currentProject?.id, titlePage]);
 
   const punctuationMap: Record<string, string> = {
     "comma": ",",
@@ -731,7 +829,7 @@ export default function App() {
     "slash": "/",
   };
 
-function replaceSpokenPunctuation(text: string): string {
+function replaceSpokenPunctuation(text: string, capitalize = true): string {
   if (!text) return "";
   let result = text;
   // Replace both "open parenthesis" and "parenthesis open" forms
@@ -759,7 +857,7 @@ function replaceSpokenPunctuation(text: string): string {
   result = result.replace(/\s{2,}/g, ' ');
   result = result.trim();
 
-  if (result.length > 0) {
+  if (result.length > 0 && capitalize) {
     // Capitalize first letter of the whole string
     result = result.charAt(0).toUpperCase() + result.slice(1);
     // Capitalize first letter after strong punctuation (handles multiple marks and trailing spaces/quotes)
@@ -770,108 +868,150 @@ function replaceSpokenPunctuation(text: string): string {
   return result;
 }
 
-  // Speech Recognition Setup
+  // Speech Recognition Setup (Deepgram)
   useEffect(() => {
-    if ("webkitSpeechRecognition" in window) {
-      const SpeechRecognition = (window as any).webkitSpeechRecognition;
-      const recognition = new SpeechRecognition();
-      recognition.continuous = true;
-      recognition.interimResults = true;
+    const stopDeepgram = () => {
+      if (mediaRecorderRef.current) {
+        mediaRecorderRef.current.stop();
+        mediaRecorderRef.current = null;
+      }
+      if (audioStreamRef.current) {
+        audioStreamRef.current.getTracks().forEach(t => t.stop());
+        audioStreamRef.current = null;
+      }
+      if (deepgramConnectionRef.current) {
+        deepgramConnectionRef.current.close();
+        deepgramConnectionRef.current = null;
+      }
+    };
 
-      recognition.onresult = (event: any) => {
-        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+    const startDeepgram = async (onTranscript: (data: any) => void) => {
+      try {
+        const key = import.meta.env.VITE_DEEPGRAM_API_KEY;
+        if (!key) { console.error("Deepgram API key not configured (set VITE_DEEPGRAM_API_KEY)"); return; }
 
-        let interimTranscript = "";
-        let newFinalText = "";
+        const staticKeyterms = ["para"];
+        const keyterms = [
+          ...staticKeyterms,
+          ...charactersRef.current
+            .flatMap(c => [c.canonical_name, ...(c.aliases ? c.aliases.split(',').map(a => a.trim()) : [])])
+            .filter(Boolean)
+        ]
+          .slice(0, 100)
+          .map(t => `keyterm=${encodeURIComponent(t)}`)
+          .join('&');
+        const wsUrl = "wss://api.deepgram.com/v1/listen" +
+          `?model=nova-3&language=en-US&interim_results=true${keyterms ? '&' + keyterms : ''}`;
+        const socket = new WebSocket(wsUrl, ["token", key]);
+        deepgramConnectionRef.current = socket;
 
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          if (event.results[i].isFinal) {
-            newFinalText += event.results[i][0].transcript;
-          } else {
-            interimTranscript += event.results[i][0].transcript;
-          }
-        }
-
-        // Apply spoken punctuation detection
-        interimTranscript = replaceSpokenPunctuation(interimTranscript);
-        newFinalText = replaceSpokenPunctuation(newFinalText);
-
-        // --- EXACT LOGIC REQUESTED ---
-        if (newFinalText) {
-          const lowerText = newFinalText.toLowerCase();
-          if (lowerText.includes("next line") || lowerText.includes("x line")) {
-            // Remove "next line" or "x line" and process immediately
-            const cleanedText = replaceSpokenPunctuation(newFinalText.replace(/(next line|x line)/gi, "").trim());
-            const startsWithPunct = /^[.,!?:;]/.test(cleanedText);
-            accumulatedTextRef.current += (accumulatedTextRef.current && cleanedText && !startsWithPunct ? " " : "") + cleanedText;
-            
-            // Final cleanup of the accumulated text before processing
-            accumulatedTextRef.current = replaceSpokenPunctuation(accumulatedTextRef.current);
-
-            const textToProcess = accumulatedTextRef.current;
-            if (textToProcess.trim()) {
-              processSpeech(textToProcess);
-              accumulatedTextRef.current = "";
-              setAccumulatedTranscript("");
-              setSecondsLeft(0);
-              if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
-              setTranscript("");
-              return;
+        socket.onopen = async () => {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          audioStreamRef.current = stream;
+          const mediaRecorder = new MediaRecorder(stream);
+          mediaRecorderRef.current = mediaRecorder;
+          mediaRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0 && socket.readyState === WebSocket.OPEN) {
+              socket.send(e.data);
             }
+          };
+          mediaRecorder.start(250);
+        };
+
+        socket.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          if (data.type === "Results") onTranscript(data);
+        };
+
+        socket.onerror = () => {
+          console.error("Deepgram WebSocket error");
+          setIsListening(false);
+          isListeningRef.current = false;
+        };
+
+        socket.onclose = () => {
+          if (isListeningRef.current) {
+            startDeepgram(onTranscript);
           }
+        };
+      } catch (e) {
+        console.error("Failed to start Deepgram", e);
+        setIsListening(false);
+        isListeningRef.current = false;
+      }
+    };
 
-          const startsWithPunct = /^[.,!?:;]/.test(newFinalText);
-          accumulatedTextRef.current += (accumulatedTextRef.current && !startsWithPunct ? " " : "") + newFinalText;
-          // Final cleanup to ensure no spaces before punctuation across joins
+    const handleTranscript = (data: any) => {
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+
+      const text = data.channel?.alternatives?.[0]?.transcript || "";
+      const isFinal = data.is_final;
+
+      if (!isFinal) {
+        setTranscript(replaceSpokenPunctuation(text, false));
+        return;
+      }
+
+      let newFinalText = replaceSpokenPunctuation(text, false);
+
+      if (newFinalText) {
+        const lowerText = newFinalText.toLowerCase();
+        if (lowerText.includes("next line") || lowerText.includes("x line")) {
+          const cleanedText = replaceSpokenPunctuation(newFinalText.replace(/(next line|x line)/gi, "").trim());
+          const startsWithPunct = /^[.,!?:;]/.test(cleanedText);
+          accumulatedTextRef.current += (accumulatedTextRef.current && cleanedText && !startsWithPunct ? " " : "") + cleanedText;
           accumulatedTextRef.current = replaceSpokenPunctuation(accumulatedTextRef.current);
-          setAccumulatedTranscript(accumulatedTextRef.current);
-        }
-
-        setTranscript(interimTranscript);
-
-        // Start the 10-second timer and countdown
-        setSecondsLeft(10);
-        if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
-        countdownIntervalRef.current = setInterval(() => {
-          setSecondsLeft(prev => Math.max(0, prev - 1));
-        }, 1000);
-
-        silenceTimerRef.current = setTimeout(() => {
           const textToProcess = accumulatedTextRef.current;
           if (textToProcess.trim()) {
-            processSpeech(textToProcess);
+            processSpeechRef.current(textToProcess);
             accumulatedTextRef.current = "";
             setAccumulatedTranscript("");
             setSecondsLeft(0);
             if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
             setTranscript("");
-          }
-        }, 10000);
-      };
-
-      recognition.onerror = (event: any) => {
-        console.error("Speech recognition error", event.error);
-        setIsListening(false);
-        isListeningRef.current = false;
-      };
-
-      recognition.onend = () => {
-        if (isListeningRef.current) {
-          try {
-            recognition.start();
-          } catch (e) {
-            console.error("Failed to restart recognition", e);
+            return;
           }
         }
-      };
 
-      recognitionRef.current = recognition;
+        const startsWithPunct = /^[.,!?:;]/.test(newFinalText);
+        accumulatedTextRef.current += (accumulatedTextRef.current && !startsWithPunct ? " " : "") + newFinalText;
+        accumulatedTextRef.current = replaceSpokenPunctuation(accumulatedTextRef.current);
+        setAccumulatedTranscript(accumulatedTextRef.current);
+      }
+
+      setTranscript("");
+      setSecondsLeft(10);
+      if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+      countdownIntervalRef.current = setInterval(() => {
+        setSecondsLeft(prev => Math.max(0, prev - 1));
+      }, 1000);
+
+      silenceTimerRef.current = setTimeout(() => {
+        const textToProcess = accumulatedTextRef.current;
+        if (textToProcess.trim()) {
+          processSpeechRef.current(textToProcess);
+          accumulatedTextRef.current = "";
+          setAccumulatedTranscript("");
+          setSecondsLeft(0);
+          if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+          setTranscript("");
+        }
+      }, 10000);
+    };
+
+    recognitionRef.current = {
+      start: () => startDeepgram(handleTranscript),
+      stop: stopDeepgram,
+    };
+
+    if (isListeningRef.current) {
+      recognitionRef.current.start();
     }
 
     return () => {
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
-      recognitionRef.current?.stop();
+      stopDeepgram();
     };
   }, []);
 
@@ -934,6 +1074,8 @@ function replaceSpokenPunctuation(text: string): string {
       setInsertionIndex(prev => prev !== null ? prev + 1 : null);
     }
   };
+  // Always keep the ref pointing to the latest processSpeech (captures current characters/state)
+  processSpeechRef.current = processSpeech;
 
   const insertTemplate = (index: number, type: string, parsed: any) => {
     const newBlocks = [...blocks];
@@ -1199,16 +1341,19 @@ function replaceSpokenPunctuation(text: string): string {
                         const title = currentProject.title;
                         await supabase
                           .from("projects")
-                          .update({ content, title, updated_at: new Date().toISOString() })
+                          .update({ content, title, title_page: titlePage, updated_at: new Date().toISOString() })
                           .eq("id", currentProject.id);
-                        setCurrentProject(prev => prev ? { ...prev, content, title } : prev);
-                        setProjects(prev => prev.map(prj => prj.id === currentProject.id ? { ...prj, content, title } : prj));
+                        setCurrentProject(prev => prev ? { ...prev, content, title, title_page: titlePage } : prev);
+                        setProjects(prev => prev.map(prj => prj.id === currentProject.id ? { ...prj, content, title, title_page: titlePage } : prj));
                         lastSavedContentRef.current = content;
                         lastSavedTitleRef.current = title;
                       }
                     }
                     setCurrentProject(p);
                     parseContentToBlocks(p.content);
+                    const newTp = p.title_page ?? null;
+                    setTitlePage(newTp);
+                    setShowTitlePage(!!newTp);
                     setHistory([]);
                     setFuture([]);
                     setActiveTab("editor");
@@ -1381,6 +1526,22 @@ function replaceSpokenPunctuation(text: string): string {
                   History
                 </button>
                 <button
+                  onClick={() => {
+                    if (!showTitlePage) {
+                      setShowTitlePage(true);
+                      if (!titlePage) setTitlePage({ title: currentProject?.title || "", subtitle: "", author: "", agencyName: "", agencyAddress: "" });
+                    } else {
+                      setShowTitlePage(false);
+                    }
+                  }}
+                  className={`flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                    showTitlePage ? "bg-stone-200 text-stone-900" : "text-stone-600 hover:bg-stone-100"
+                  }`}
+                >
+                  <FileText size={16} />
+                  Title Page
+                </button>
+                <button
                   onClick={() => toggleListening()}
                   className={`flex items-center gap-2 px-4 py-1 text-sm font-medium rounded-full transition-colors ${
                     isListening
@@ -1409,6 +1570,47 @@ function replaceSpokenPunctuation(text: string): string {
         <main className="flex-1 overflow-y-auto bg-stone-200 p-8 flex flex-col items-center">
           {activeTab === "editor" ? (
             <div id="script-content" className="w-full flex flex-col items-center">
+              {showTitlePage && titlePage && (
+                <div className="relative w-[8.5in] h-[11in] bg-white shadow-lg mb-8 pl-[1.5in] pr-[1in] font-mono text-[12pt] leading-[1.4] text-black overflow-hidden flex flex-col">
+                  {/* Centered title block at roughly 1/3 down */}
+                  <div className="flex-1 flex flex-col items-center justify-center" style={{ paddingBottom: "3in" }}>
+                    <div
+                      contentEditable
+                      suppressContentEditableWarning
+                      onBlur={e => { const v = e.currentTarget.innerText.trim(); setTitlePage(prev => prev ? { ...prev, title: v } : prev); }}
+                      className="font-bold underline uppercase text-center outline-none min-w-[4px] empty:before:content-['Title'] empty:before:text-stone-300 empty:before:normal-case empty:before:no-underline"
+                    >{titlePage.title}</div>
+                    <div
+                      contentEditable
+                      suppressContentEditableWarning
+                      onBlur={e => { const v = e.currentTarget.innerText.trim(); setTitlePage(prev => prev ? { ...prev, subtitle: v } : prev); }}
+                      className="text-center outline-none mt-3 min-w-[4px] empty:before:content-['Subtitle_(optional)'] empty:before:text-stone-300"
+                    >{titlePage.subtitle}</div>
+                    <div className="text-center mt-4">Written by</div>
+                    <div
+                      contentEditable
+                      suppressContentEditableWarning
+                      onBlur={e => { const v = e.currentTarget.innerText.trim(); setTitlePage(prev => prev ? { ...prev, author: v } : prev); }}
+                      className="text-center outline-none mt-1 min-w-[4px] empty:before:content-['Author_name'] empty:before:text-stone-300"
+                    >{titlePage.author}</div>
+                  </div>
+                  {/* Agency info bottom-left */}
+                  <div className="absolute bottom-[1in] left-[1.5in] flex flex-col gap-0">
+                    <div
+                      contentEditable
+                      suppressContentEditableWarning
+                      onBlur={e => { const v = e.currentTarget.innerText.trim(); setTitlePage(prev => prev ? { ...prev, agencyName: v } : prev); }}
+                      className="outline-none min-w-[4px] empty:before:content-['Agency_name_(optional)'] empty:before:text-stone-300"
+                    >{titlePage.agencyName}</div>
+                    <div
+                      contentEditable
+                      suppressContentEditableWarning
+                      onBlur={e => { const v = e.currentTarget.innerText.trim(); setTitlePage(prev => prev ? { ...prev, agencyAddress: v } : prev); }}
+                      className="outline-none min-w-[4px] empty:before:content-['Agency_address_(optional)'] empty:before:text-stone-300"
+                    >{titlePage.agencyAddress}</div>
+                  </div>
+                </div>
+              )}
               {blocks.length === 0 ? (
                 <Page pageNumber={1}>
                   <div className="relative h-full flex flex-col">
@@ -1430,11 +1632,6 @@ function replaceSpokenPunctuation(text: string): string {
                             <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
                           </span>
                           <span className="text-stone-600">{accumulatedTranscript}</span>
-                          {secondsLeft > 0 && (
-                            <span className="text-[10px] bg-stone-100 text-stone-400 px-1.5 py-0.5 rounded-full font-sans not-italic">
-                              Processing in {secondsLeft}s...
-                            </span>
-                          )}
                         </div>
                         <span className="text-stone-400">{transcript || (!accumulatedTranscript ? "Listening..." : "")}</span>
                       </div>
@@ -1507,11 +1704,6 @@ function replaceSpokenPunctuation(text: string): string {
                                   <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
                                 </span>
                                 <span className="text-stone-600">{accumulatedTranscript}</span>
-                                {secondsLeft > 0 && (
-                                  <span className="text-[10px] bg-stone-100 text-stone-400 px-1.5 py-0.5 rounded-full font-sans not-italic">
-                                    Processing in {secondsLeft}s...
-                                  </span>
-                                )}
                               </div>
                               <span className="text-stone-400">{transcript || (!accumulatedTranscript ? "Listening..." : "")}</span>
                             </div>
@@ -1580,7 +1772,23 @@ function replaceSpokenPunctuation(text: string): string {
                     {characters.map((c) => (
                       <tr key={c.id} className="group">
                         <td className="px-6 py-4 font-medium text-stone-900">{c.canonical_name}</td>
-                        <td className="px-6 py-4 text-stone-500">{c.aliases}</td>
+                        <td className="px-6 py-4">
+                          <input
+                            type="text"
+                            defaultValue={c.aliases}
+                            onBlur={async (e) => {
+                              const newVal = e.target.value;
+                              if (newVal !== c.aliases) {
+                                await supabase
+                                  .from("characters")
+                                  .update({ aliases: newVal })
+                                  .eq("id", c.id);
+                                fetchCharacters();
+                              }
+                            }}
+                            className="w-full bg-transparent border-none focus:ring-1 focus:ring-emerald-500 rounded px-2 py-1 text-stone-500"
+                          />
+                        </td>
                         <td className="px-6 py-4 text-right">
                           <button
                             onClick={() => {

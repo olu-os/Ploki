@@ -3,6 +3,7 @@ create table projects (
   user_id uuid references auth.users not null default auth.uid(),
   title text not null default 'New Script',
   content text not null default '[]',
+  title_page jsonb,
   updated_at timestamptz not null default now()
 );
 alter table projects enable row level security;

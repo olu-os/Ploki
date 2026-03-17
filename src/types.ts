@@ -1,8 +1,17 @@
+export interface TitlePageData {
+  title: string;
+  subtitle: string;
+  author: string;
+  agencyName: string;
+  agencyAddress: string;
+}
+
 export interface Project {
   id: string;
   user_id: string;
   title: string;
   content: string;
+  title_page: TitlePageData | null;
   updated_at: string;
 }
 

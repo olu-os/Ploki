@@ -3,6 +3,8 @@ import { createServer as createViteServer } from "vite";
 import Database from "better-sqlite3";
 import path from "path";
 import { fileURLToPath } from "url";
+import dotenv from "dotenv";
+dotenv.config();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -51,6 +53,16 @@ async function startServer() {
   // API routes
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
+  });
+
+  // Deepgram API key endpoint (key stays server-side, not in the browser bundle)
+  app.get("/api/deepgram-key", (req, res) => {
+    const key = process.env.DEEPGRAM_API_KEY;
+    if (!key) {
+      res.status(503).json({ error: "Deepgram API key not configured" });
+      return;
+    }
+    res.json({ key });
   });
 
   // Basic Auth Mock (for resume purposes, we'll implement a simple mock auth)

@@ -1,0 +1,8 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^Get-Content \"C:\\\\Coding Projects\\\\Ploki\\\\node_modules\\\\@deepgram\\\\sdk\\\\package\\.json\" \\| ConvertFrom-Json \\| Select-Object version, main, module, exports$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}
