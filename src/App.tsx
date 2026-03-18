@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Mic, MicOff, Save, FileText, Users, Plus, Download, Undo, Redo, LogOut, History } from "lucide-react";
 import { Project, Character, ParsedBlock, ProjectVersion, TitlePageData } from "./types";
+import * as SpeechSDK from "microsoft-cognitiveservices-speech-sdk";
 import { supabase } from "./lib/supabase";
 import { parseNLP } from "./lib/parseNLP";
 import { replaceSpokenPunctuation } from "./lib/punctuation";
@@ -16,15 +17,12 @@ export default function App() {
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [accumulatedTranscript, setAccumulatedTranscript] = useState("");
-  const [secondsLeft, setSecondsLeft] = useState(0);
   const silenceTimerRef = useRef<any>(null);
-  const countdownIntervalRef = useRef<any>(null);
+  const toggleListeningRef = useRef<() => void>(() => {});
   const accumulatedTextRef = useRef("");
   const isListeningRef = useRef(false);
   const recognitionRef = useRef<any>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioStreamRef = useRef<MediaStream | null>(null);
-  const deepgramConnectionRef = useRef<any>(null);
+
   const processSpeechRef = useRef<(text: string) => void>(() => {});
   const charactersRef = useRef<Character[]>([]);
   const [blocks, setBlocks] = useState<ParsedBlock[]>([]);
@@ -35,6 +33,8 @@ export default function App() {
   const [titlePage, setTitlePage] = useState<TitlePageData | null>(null);
   const [showTitlePage, setShowTitlePage] = useState(false);
   const [loadingVersions, setLoadingVersions] = useState(false);
+
+  const azureRecognizerRef = useRef<SpeechSDK.SpeechRecognizer | null>(null);
 
   const updateBlocks = (newBlocks: ParsedBlock[] | ((prev: ParsedBlock[]) => ParsedBlock[])) => {
     setBlocks(prev => {
@@ -284,114 +284,80 @@ export default function App() {
     return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current); };
   }, [blocks, currentProject?.title, currentProject?.id, titlePage]);
 
-  // Speech Recognition Setup (Deepgram)
+  // Speech Recognition Setup (Azure)
   useEffect(() => {
-    const stopDeepgram = () => {
-      if (mediaRecorderRef.current) {
-        mediaRecorderRef.current.stop();
-        mediaRecorderRef.current = null;
-      }
-      if (audioStreamRef.current) {
-        audioStreamRef.current.getTracks().forEach(t => t.stop());
-        audioStreamRef.current = null;
-      }
-      if (deepgramConnectionRef.current) {
-        deepgramConnectionRef.current.close();
-        deepgramConnectionRef.current = null;
+    const stopAzure = () => {
+      if (azureRecognizerRef.current) {
+        azureRecognizerRef.current.stopContinuousRecognitionAsync(() => {
+          azureRecognizerRef.current?.close();
+          azureRecognizerRef.current = null;
+        });
       }
     };
 
-    const startDeepgram = async (onTranscript: (data: any) => void) => {
+    const startAzure = async (onTranscript: (text: string, isFinal: boolean) => void) => {
       try {
-        const key = import.meta.env.VITE_DEEPGRAM_API_KEY;
-        if (!key) { console.error("Deepgram API key not configured (set VITE_DEEPGRAM_API_KEY)"); return; }
+        const key = import.meta.env.VITE_AZURE_SPEECH_KEY;
+        const region = import.meta.env.VITE_AZURE_SPEECH_REGION;
 
-        const staticKeyterms = ["para"];
-        const keyterms = [
-          ...staticKeyterms,
-          ...charactersRef.current
-            .flatMap(c => [c.canonical_name, ...(c.aliases ? c.aliases.split(',').map(a => a.trim()) : [])])
-            .filter(Boolean)
-        ]
-          .slice(0, 100)
-          .map(t => `keyterm=${encodeURIComponent(t)}`)
-          .join('&');
-        const wsUrl = "wss://api.deepgram.com/v1/listen" +
-          `?model=nova-3&language=en-US&interim_results=true&endpointing=300&utterance_end_ms=1000${keyterms ? '&' + keyterms : ''}`;
-        const socket = new WebSocket(wsUrl, ["token", key]);
-        deepgramConnectionRef.current = socket;
+        if (!key || !region) {
+          console.error("Azure credentials missing.");
+          return;
+        }
 
-        socket.onopen = async () => {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          audioStreamRef.current = stream;
-          const mediaRecorder = new MediaRecorder(stream);
-          mediaRecorderRef.current = mediaRecorder;
-          mediaRecorder.ondataavailable = (e) => {
-            if (e.data.size > 0 && socket.readyState === WebSocket.OPEN) {
-              socket.send(e.data);
-            }
-          };
-          mediaRecorder.start(250);
+        const speechConfig = SpeechSDK.SpeechConfig.fromSubscription(key, region);
+        speechConfig.speechRecognitionLanguage = "en-US";
+        // Request detailed output to get access to ITN/Lexical fields if needed
+        speechConfig.outputFormat = SpeechSDK.OutputFormat.Detailed;
+        // Explicitly disable punctuation and ITN (Inverse Text Normalization)
+        speechConfig.setServiceProperty('punctuation', 'explicit', SpeechSDK.ServicePropertyChannel.UriQueryParameter);
+        
+        const audioConfig = SpeechSDK.AudioConfig.fromDefaultMicrophoneInput();
+        const recognizer = new SpeechSDK.SpeechRecognizer(speechConfig, audioConfig);
+        azureRecognizerRef.current = recognizer;
+
+        // Phrase list for character names
+        const phraseList = SpeechSDK.PhraseListGrammar.fromRecognizer(recognizer);
+        phraseList.addPhrases(["para"]);
+        charactersRef.current.forEach(c => {
+          phraseList.addPhrase(c.canonical_name);
+          if (c.aliases) c.aliases.split(",").forEach(a => phraseList.addPhrase(a.trim()));
+        });
+
+        recognizer.recognizing = (s, e) => {
+          onTranscript(e.result.text, false);
         };
-
-        socket.onmessage = (event) => {
-          const data = JSON.parse(event.data);
-          if (data.type === "Results") onTranscript(data);
-        };
-
-        socket.onerror = () => {
-          console.error("Deepgram WebSocket error");
-          setIsListening(false);
-          isListeningRef.current = false;
-        };
-
-        socket.onclose = () => {
-          if (isListeningRef.current) {
-            startDeepgram(onTranscript);
+        recognizer.recognized = (s, e) => {
+          if (e.result.reason === SpeechSDK.ResultReason.RecognizedSpeech) {
+            onTranscript(e.result.text, true);
           }
         };
-      } catch (e) {
-        console.error("Failed to start Deepgram", e);
-        setIsListening(false);
-        isListeningRef.current = false;
+
+        recognizer.startContinuousRecognitionAsync();
+      } catch (err) {
+        console.error("Azure error:", err);
       }
     };
 
-    const handleTranscript = (data: any) => {
-      // Ignore non-results or empty results early to prevent accidental processing
-      if (data.type !== "Results" || !data.channel?.alternatives?.[0]) return;
-      
-      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-
-      const alternative = data.channel.alternatives[0];
-      const text = alternative.transcript || "";
-      const isFinal = data.is_final;
-      const speechFinal = data.speech_final;
-
+    const handleTranscript = (text: string, isFinal: boolean) => {
       if (!isFinal) {
         setTranscript(replaceSpokenPunctuation(text, false));
         return;
       }
 
-      // Deepgram sometimes sends multiple "final" results for the same utterance or empty finals
-      if (!text.trim()) return;
-
-      let newFinalText = replaceSpokenPunctuation(text, false);
-
+      //prevents Azure from replacing next line, which we use as a marker for new lines in the spoken input, with \n
+      const newFinalText = replaceSpokenPunctuation(text.replace(/\n+/g, " next line ").trim(), false);
       if (newFinalText) {
         const lowerText = newFinalText.toLowerCase();
         if (lowerText.includes("next line") || lowerText.includes("x line") || lowerText.includes("next slide") || lowerText.includes("x slide") || lowerText.includes("next lie") || lowerText.includes("x lie")) {
-          const cleanedText = replaceSpokenPunctuation(newFinalText.replace(/(next line|x line|next slide|x slide|next lie|x lie)/gi, "").trim());
+          const cleanedText = newFinalText.replace(/(next line|x line|next slide|x slide|next lie|x lie)/gi, "").trim();
           const startsWithPunct = /^[.,!?:;]/.test(cleanedText);
           accumulatedTextRef.current += (accumulatedTextRef.current && cleanedText && !startsWithPunct ? " " : "") + cleanedText;
-          accumulatedTextRef.current = replaceSpokenPunctuation(accumulatedTextRef.current);
           const textToProcess = accumulatedTextRef.current;
           if (textToProcess.trim()) {
             processSpeechRef.current(textToProcess);
             accumulatedTextRef.current = "";
             setAccumulatedTranscript("");
-            setSecondsLeft(0);
-            if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
             setTranscript("");
             return;
           }
@@ -399,37 +365,21 @@ export default function App() {
 
         const startsWithPunct = /^[.,!?:;]/.test(newFinalText);
         accumulatedTextRef.current += (accumulatedTextRef.current && !startsWithPunct ? " " : "") + newFinalText;
-        accumulatedTextRef.current = replaceSpokenPunctuation(accumulatedTextRef.current);
         setAccumulatedTranscript(accumulatedTextRef.current);
       }
 
       setTranscript("");
-      
-      // Only set the countdown and silence timer if we actually have text and it's speech_final
-      if (speechFinal && accumulatedTextRef.current.trim()) {
-        setSecondsLeft(10);
-        if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
-        countdownIntervalRef.current = setInterval(() => {
-          setSecondsLeft(prev => Math.max(0, prev - 1));
-        }, 1000);
 
-        silenceTimerRef.current = setTimeout(() => {
-          const textToProcess = accumulatedTextRef.current;
-          if (textToProcess.trim()) {
-            processSpeechRef.current(textToProcess);
-            accumulatedTextRef.current = "";
-            setAccumulatedTranscript("");
-            setSecondsLeft(0);
-            if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
-            setTranscript("");
-          }
-        }, 10000);
-      }
+      // Reset 20-second silence auto-stop timer
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = setTimeout(() => {
+        if (isListeningRef.current) toggleListeningRef.current();
+      }, 20000);
     };
 
     recognitionRef.current = {
-      start: () => startDeepgram(handleTranscript),
-      stop: stopDeepgram,
+      start: () => startAzure(handleTranscript),
+      stop: () => stopAzure(),
     };
 
     if (isListeningRef.current) {
@@ -438,8 +388,7 @@ export default function App() {
 
     return () => {
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-      if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
-      stopDeepgram();
+      stopAzure();
     };
   }, []);
 
@@ -457,16 +406,21 @@ export default function App() {
 
       recognitionRef.current?.stop();
       isListeningRef.current = false;
-      if (accumulatedTextRef.current.trim()) {
-        processSpeech(accumulatedTextRef.current);
+      const combined = (accumulatedTextRef.current + (transcript ? " " + transcript : "")).trim();
+      if (combined) {
+        processSpeech(combined);
         accumulatedTextRef.current = "";
         setAccumulatedTranscript("");
-        setSecondsLeft(0);
+        setTranscript("");
       }
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-      if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
       setInsertionIndex(null);
     } else {
+      // Start 20-second silence timer when listening begins
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = setTimeout(() => {
+        if (isListeningRef.current) toggleListeningRef.current();
+      }, 20000);
       setInsertionIndex(index !== undefined ? index : blocks.length);
       try {
         recognitionRef.current?.start();
@@ -503,6 +457,7 @@ export default function App() {
     }
   };
   processSpeechRef.current = processSpeech;
+  toggleListeningRef.current = () => toggleListening();
 
   const insertTemplate = (index: number, type: string, parsed: any) => {
     const newBlocks = [...blocks];
@@ -519,7 +474,7 @@ export default function App() {
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (manualInput.trim()) {
-      processSpeech(replaceSpokenPunctuation(manualInput));
+      processSpeech(manualInput);
       setManualInput("");
     }
   };
@@ -704,6 +659,7 @@ export default function App() {
                 >
                   Clear
                 </button>
+
                 <div className="flex bg-stone-100 rounded-md overflow-hidden">
                   <button
                     onClick={() => {
@@ -848,7 +804,6 @@ export default function App() {
                       accumulatedTranscript={accumulatedTranscript}
                       transcript={transcript}
                       onAccumulatedTranscriptChange={handleAccumulatedTranscriptChange}
-                      secondsLeft={secondsLeft}
                     />
                     
                     <div className="mt-4">
@@ -894,7 +849,6 @@ export default function App() {
                             accumulatedTranscript={accumulatedTranscript}
                             transcript={transcript}
                             onAccumulatedTranscriptChange={handleAccumulatedTranscriptChange}
-                            secondsLeft={secondsLeft}
                           />
                           <ScriptBlock block={block} index={index} blocks={blocks} updateBlocks={updateBlocks} />
                         </React.Fragment>
@@ -909,7 +863,6 @@ export default function App() {
                             accumulatedTranscript={accumulatedTranscript}
                             transcript={transcript}
                             onAccumulatedTranscriptChange={handleAccumulatedTranscriptChange}
-                            secondsLeft={secondsLeft}
                           />
                           
                           <form onSubmit={handleManualSubmit} className="mt-8 pt-4 border-t border-stone-100 flex gap-2">

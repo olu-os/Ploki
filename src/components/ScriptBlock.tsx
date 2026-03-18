@@ -10,6 +10,14 @@ interface ScriptBlockProps {
 
 export const ScriptBlock: React.FC<ScriptBlockProps> = ({ block, index, blocks, updateBlocks }) => {
   const updateBlockParsed = (newParsed: any) => {
+    // Delete block if empty
+    const isEmpty = typeof newParsed === "string"
+      ? newParsed.trim() === ""
+      : !newParsed.dialogue?.trim() && !newParsed.speaker?.trim();
+    if (isEmpty) {
+      updateBlocks((prev) => prev.filter((_, i) => i !== index));
+      return;
+    }
     const newBlocks = [...blocks];
     newBlocks[index] = { ...block, parsed: newParsed };
     updateBlocks(newBlocks);

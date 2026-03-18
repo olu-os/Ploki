@@ -55,16 +55,6 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
-  // Deepgram API key endpoint (key stays server-side, not in the browser bundle)
-  app.get("/api/deepgram-key", (req, res) => {
-    const key = process.env.DEEPGRAM_API_KEY;
-    if (!key) {
-      res.status(503).json({ error: "Deepgram API key not configured" });
-      return;
-    }
-    res.json({ key });
-  });
-
   // Basic Auth Mock (for resume purposes, we'll implement a simple mock auth)
   let currentUser = 1; // Mock user ID
   

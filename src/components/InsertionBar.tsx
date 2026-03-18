@@ -9,7 +9,6 @@ interface InsertionBarProps {
   accumulatedTranscript: string;
   transcript: string;
   onAccumulatedTranscriptChange: (text: string) => void;
-  secondsLeft: number;
 }
 
 export const InsertionBar: React.FC<InsertionBarProps> = ({
@@ -20,7 +19,6 @@ export const InsertionBar: React.FC<InsertionBarProps> = ({
   accumulatedTranscript,
   transcript,
   onAccumulatedTranscriptChange,
-  secondsLeft
 }) => {
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);

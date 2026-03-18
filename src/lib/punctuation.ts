@@ -11,6 +11,7 @@ const punctuationMap: Record<string, string> = {
   "dot dot": "...",
   "ellipsis": "...",
   "dash": "-",
+  "dash dash": "--",
   "hyphen": "-",
   "open parenthesis": "(",
   "close parenthesis": ")",
