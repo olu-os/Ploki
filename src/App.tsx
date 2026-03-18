@@ -317,7 +317,7 @@ export default function App() {
           .map(t => `keyterm=${encodeURIComponent(t)}`)
           .join('&');
         const wsUrl = "wss://api.deepgram.com/v1/listen" +
-          `?model=nova-3&language=en-US&interim_results=true${keyterms ? '&' + keyterms : ''}`;
+          `?model=nova-3&language=en-US&interim_results=true&endpointing=300&utterance_end_ms=1000${keyterms ? '&' + keyterms : ''}`;
         const socket = new WebSocket(wsUrl, ["token", key]);
         deepgramConnectionRef.current = socket;
 
@@ -358,15 +358,23 @@ export default function App() {
     };
 
     const handleTranscript = (data: any) => {
+      // Ignore non-results or empty results early to prevent accidental processing
+      if (data.type !== "Results" || !data.channel?.alternatives?.[0]) return;
+      
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
 
-      const text = data.channel?.alternatives?.[0]?.transcript || "";
+      const alternative = data.channel.alternatives[0];
+      const text = alternative.transcript || "";
       const isFinal = data.is_final;
+      const speechFinal = data.speech_final;
 
       if (!isFinal) {
         setTranscript(replaceSpokenPunctuation(text, false));
         return;
       }
+
+      // Deepgram sometimes sends multiple "final" results for the same utterance or empty finals
+      if (!text.trim()) return;
 
       let newFinalText = replaceSpokenPunctuation(text, false);
 
@@ -396,23 +404,27 @@ export default function App() {
       }
 
       setTranscript("");
-      setSecondsLeft(10);
-      if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
-      countdownIntervalRef.current = setInterval(() => {
-        setSecondsLeft(prev => Math.max(0, prev - 1));
-      }, 1000);
+      
+      // Only set the countdown and silence timer if we actually have text and it's speech_final
+      if (speechFinal && accumulatedTextRef.current.trim()) {
+        setSecondsLeft(10);
+        if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+        countdownIntervalRef.current = setInterval(() => {
+          setSecondsLeft(prev => Math.max(0, prev - 1));
+        }, 1000);
 
-      silenceTimerRef.current = setTimeout(() => {
-        const textToProcess = accumulatedTextRef.current;
-        if (textToProcess.trim()) {
-          processSpeechRef.current(textToProcess);
-          accumulatedTextRef.current = "";
-          setAccumulatedTranscript("");
-          setSecondsLeft(0);
-          if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
-          setTranscript("");
-        }
-      }, 10000);
+        silenceTimerRef.current = setTimeout(() => {
+          const textToProcess = accumulatedTextRef.current;
+          if (textToProcess.trim()) {
+            processSpeechRef.current(textToProcess);
+            accumulatedTextRef.current = "";
+            setAccumulatedTranscript("");
+            setSecondsLeft(0);
+            if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+            setTranscript("");
+          }
+        }, 10000);
+      }
     };
 
     recognitionRef.current = {
