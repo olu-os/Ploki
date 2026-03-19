@@ -55,7 +55,6 @@ export function parseNLP(text: string, characters: Character[], lastSpeaker: str
     type = "act_header";
     parsedText = processedText.trim().toUpperCase();
   } else {
-    // Extract para...para from anywhere in the full text before dialogue parsing
     let preExtractedParenthetical = "";
     let cleanedText = processedText;
     const preParaMatch = processedText.match(/^(.*?)\s*(?:para|power|parenthetical)\s+(.+?)\s+(?:para|power|parenthetical)\s*(.*?)$/i);
@@ -66,8 +65,8 @@ export function parseNLP(text: string, characters: Character[], lastSpeaker: str
       cleanedText = (before + (before && after ? " " : "") + after).trim();
     }
 
-    // Dialogue: "Will says ..." or "Will continues ..."
-    const dialogueMatch = cleanedText.match(/^(.+?)\s+(says|asks|yells|whispers|replies|retorts|responds|queries|goes on|continues|shouts|screams|mumbles|stutters|exclaims|states|mentions|adds|tells|explains|argues|insists)(?:\s+(.+))?$/i);
+    // Dialogue: "Will says ..." or "Will continued ..."
+    const dialogueMatch = cleanedText.match(/^(.+?)\s+(says|said|asks|asked|yells|yelled|whispers|whispered|replies|replied|retorts|retorted|responds|responded|queries|queried|goes on|went on|continues|continued|shouts|shouted|screams|screamed|mumbles|mumbled|stutters|stuttered|exclaims|exclaimed|states|stated|mentions|mentioned|adds|added|tells|told|explains|explained|argues|argued|insists|insisted)(?:\s+(.+))?$/i);
     if (dialogueMatch) {
       let speaker = dialogueMatch[1].trim();
       const action = dialogueMatch[2].toLowerCase();
@@ -75,7 +74,7 @@ export function parseNLP(text: string, characters: Character[], lastSpeaker: str
       dialogue = dialogue.replace(/^['"]|['"]$/g, "");
       // CONT'D detection: if verb is 'continues' or 'goes on' and speaker matches lastSpeaker
       let isContd = false;
-      if ((action === "continues" || action === "goes on") && lastSpeaker && speaker.toUpperCase() === lastSpeaker.toUpperCase()) {
+      if ((action === "continues" || action === "continued" || action === "goes on" || action === "went on") && lastSpeaker && speaker.toUpperCase() === lastSpeaker.toUpperCase()) {
         isContd = true;
       }
       // Alias lookup

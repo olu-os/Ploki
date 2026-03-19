@@ -18,6 +18,7 @@ export default function App() {
   const [transcript, setTranscript] = useState("");
   const [accumulatedTranscript, setAccumulatedTranscript] = useState("");
   const silenceTimerRef = useRef<any>(null);
+  const pendingStopRef = useRef(false);
   const toggleListeningRef = useRef<() => void>(() => {});
   const accumulatedTextRef = useRef("");
   const isListeningRef = useRef(false);
@@ -33,6 +34,11 @@ export default function App() {
   const [titlePage, setTitlePage] = useState<TitlePageData | null>(null);
   const [showTitlePage, setShowTitlePage] = useState(false);
   const [loadingVersions, setLoadingVersions] = useState(false);
+  const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
+  const [selectionBox, setSelectionBox] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
+  const isDraggingRef = useRef(false);
+  const mousePosRef = useRef({ x: 0, y: 0 });
+  const shiftKeyRef = useRef(false);
 
   const azureRecognizerRef = useRef<SpeechSDK.SpeechRecognizer | null>(null);
 
@@ -77,10 +83,133 @@ export default function App() {
           undoRef.current();
         }
       }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === ".") {
+        e.preventDefault();
+        toggleListeningRef.current();
+      }
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedIndices.size > 0) {
+        // Check if we're not in an input/textarea
+        if (document.activeElement?.tagName !== "INPUT" && document.activeElement?.tagName !== "TEXTAREA" && !document.activeElement?.hasAttribute("contenteditable")) {
+          e.preventDefault();
+          deleteSelected();
+        }
+      }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [selectedIndices]);
+
+  const deleteSelected = () => {
+    if (selectedIndices.size === 0) return;
+    updateBlocks(prev => prev.filter((_, i) => !selectedIndices.has(i)));
+    setSelectedIndices(new Set());
+  };
+
+  const updateSelection = (clientX: number, clientY: number, isInitial = false) => {
+    if (!isDraggingRef.current) return;
+    
+    const container = document.getElementById('script-content');
+    if (!container) return;
+    
+    const rect = container.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+
+    setSelectionBox(prev => {
+      const startX = isInitial ? x : (prev?.startX ?? x);
+      const startY = isInitial ? y : (prev?.startY ?? y);
+      return { startX, startY, endX: x, endY: y };
+    });
+
+    // Calculate selection rectangle in viewport coordinates for intersection check
+    setSelectionBox(current => {
+      if (!current) return null;
+      
+      const selRect = {
+        left: Math.min(current.startX, x) + rect.left,
+        top: Math.min(current.startY, y) + rect.top,
+        right: Math.max(current.startX, x) + rect.left,
+        bottom: Math.max(current.startY, y) + rect.top
+      };
+
+      // Find blocks that intersect with the selection rectangle
+      const newSelected = new Set(shiftKeyRef.current ? selectedIndices : []);
+      const blockElements = document.querySelectorAll('[data-block-index]');
+      blockElements.forEach(el => {
+        const elRect = el.getBoundingClientRect();
+        const index = parseInt(el.getAttribute('data-block-index') || '-1');
+        
+        const intersects = !(
+          elRect.right < selRect.left ||
+          elRect.left > selRect.right ||
+          elRect.bottom < selRect.top ||
+          elRect.top > selRect.bottom
+        );
+
+        if (intersects && index !== -1) {
+          newSelected.add(index);
+        }
+      });
+
+      setSelectedIndices(newSelected as Set<number>);
+      return current;
+    });
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    // Only start selection if clicking on the background or a block
+    const target = e.target as HTMLElement;
+    const isButton = target.closest('button');
+    const isInput = target.closest('input') || target.closest('[contenteditable="true"]');
+    
+    if (isButton || isInput) return;
+
+    const blockElement = target.closest('[data-block-index]');
+    const blockIndex = blockElement ? parseInt(blockElement.getAttribute('data-block-index') || '-1') : -1;
+
+    isDraggingRef.current = true;
+    mousePosRef.current = { x: e.clientX, y: e.clientY };
+    shiftKeyRef.current = e.shiftKey;
+    
+    updateSelection(e.clientX, e.clientY, true);
+
+    if (!e.shiftKey && !e.metaKey && !e.ctrlKey) {
+      if (blockIndex !== -1) {
+        // If clicking on a block, select it if it's not already selected
+        if (!selectedIndices.has(blockIndex)) {
+          setSelectedIndices(new Set([blockIndex]));
+        }
+      } else {
+        setSelectedIndices(new Set());
+      }
+    } else if (blockIndex !== -1) {
+      // Toggle selection with modifier keys
+      const newSelected = new Set(selectedIndices);
+      if (newSelected.has(blockIndex)) {
+        newSelected.delete(blockIndex);
+      } else {
+        newSelected.add(blockIndex);
+      }
+      setSelectedIndices(newSelected);
+    }
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDraggingRef.current) return;
+    mousePosRef.current = { x: e.clientX, y: e.clientY };
+    shiftKeyRef.current = e.shiftKey;
+    updateSelection(e.clientX, e.clientY);
+  };
+
+  const handleScroll = (e: React.UIEvent<HTMLElement>) => {
+    if (!isDraggingRef.current) return;
+    updateSelection(mousePosRef.current.x, mousePosRef.current.y);
+  };
+
+  const handleMouseUp = () => {
+    isDraggingRef.current = false;
+    setSelectionBox(null);
+  };
 
   const [activeTab, setActiveTab] = useState<"editor" | "characters">("editor");
   const [characters, setCharacters] = useState<Character[]>([]);
@@ -289,6 +418,17 @@ export default function App() {
     const stopAzure = () => {
       if (azureRecognizerRef.current) {
         azureRecognizerRef.current.stopContinuousRecognitionAsync(() => {
+          // If no `recognized` event fired (silence/no speech), process whatever was accumulated
+          if (pendingStopRef.current) {
+            pendingStopRef.current = false;
+            const textToProcess = accumulatedTextRef.current;
+            if (textToProcess.trim()) {
+              processSpeechRef.current(textToProcess);
+              accumulatedTextRef.current = "";
+              setAccumulatedTranscript("");
+            }
+            setTranscript("");
+          }
           azureRecognizerRef.current?.close();
           azureRecognizerRef.current = null;
         });
@@ -349,23 +489,41 @@ export default function App() {
       const newFinalText = replaceSpokenPunctuation(text.replace(/\n+/g, " next line ").trim(), false);
       if (newFinalText) {
         const lowerText = newFinalText.toLowerCase();
+
+        // Voice command: clear accumulated line
+        if (lowerText.includes("clear line") || lowerText.includes("clear that") || lowerText.includes("delete line") || lowerText.includes("scratch that")) {
+          accumulatedTextRef.current = "";
+          setAccumulatedTranscript("");
+          setTranscript("");
+          return;
+        }
+
         if (lowerText.includes("next line") || lowerText.includes("x line") || lowerText.includes("next slide") || lowerText.includes("x slide") || lowerText.includes("next lie") || lowerText.includes("x lie")) {
-          const cleanedText = newFinalText.replace(/(next line|x line|next slide|x slide|next lie|x lie)/gi, "").trim();
-          const startsWithPunct = /^[.,!?:;]/.test(cleanedText);
-          accumulatedTextRef.current += (accumulatedTextRef.current && cleanedText && !startsWithPunct ? " " : "") + cleanedText;
-          const textToProcess = accumulatedTextRef.current;
-          if (textToProcess.trim()) {
-            processSpeechRef.current(textToProcess);
-            accumulatedTextRef.current = "";
-            setAccumulatedTranscript("");
-            setTranscript("");
-            return;
+          // Combine whatever was already accumulated with this new utterance
+          const startsWithPunct = /^[.,!?:;]/.test(newFinalText);
+          const combined = (accumulatedTextRef.current + (accumulatedTextRef.current && !startsWithPunct ? " " : "") + newFinalText).trim();
+          // Split on every "next line" variant to get individual blocks
+          const segments = combined.split(/next line|x line|next slide|x slide|next lie|x lie/gi).map(s => s.trim()).filter(Boolean);
+          accumulatedTextRef.current = "";
+          setAccumulatedTranscript("");
+          setTranscript("");
+          for (const seg of segments) {
+            processSpeechRef.current(seg);
           }
+          return;
         }
 
         const startsWithPunct = /^[.,!?:;]/.test(newFinalText);
         accumulatedTextRef.current += (accumulatedTextRef.current && !startsWithPunct ? " " : "") + newFinalText;
         setAccumulatedTranscript(accumulatedTextRef.current);
+
+        // If user pressed stop while this was interim, now process and finish stopping
+        if (pendingStopRef.current) {
+          pendingStopRef.current = false;
+          processSpeechRef.current(accumulatedTextRef.current);
+          accumulatedTextRef.current = "";
+          setAccumulatedTranscript("");
+        }
       }
 
       setTranscript("");
@@ -404,15 +562,10 @@ export default function App() {
         return;
       }
 
-      recognitionRef.current?.stop();
       isListeningRef.current = false;
-      const combined = (accumulatedTextRef.current + (transcript ? " " + transcript : "")).trim();
-      if (combined) {
-        processSpeech(combined);
-        accumulatedTextRef.current = "";
-        setAccumulatedTranscript("");
-        setTranscript("");
-      }
+      pendingStopRef.current = true;
+      setTranscript(""); // Clear interim display; final result will come from Azure
+      recognitionRef.current?.stop();
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       setInsertionIndex(null);
     } else {
@@ -732,6 +885,7 @@ export default function App() {
                       ? "bg-red-100 text-red-700 hover:bg-red-200"
                       : "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
                   }`}
+                  title={isListening ? "Stop Listening (Ctrl+L)" : "Start Listening (Ctrl+L)"}
                 >
                   {isListening ? (
                     <>
@@ -751,9 +905,49 @@ export default function App() {
         </header>
 
         {/* Workspace */}
-        <main className="flex-1 overflow-y-auto bg-stone-200 p-8 flex flex-col items-center">
+        <main 
+          className="flex-1 overflow-y-auto bg-stone-200 p-8 flex flex-col items-center relative select-none"
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onScroll={handleScroll}
+        >
+          {selectedIndices.size > 0 && (
+            <div className="fixed bottom-8 right-8 z-[110] animate-in fade-in slide-in-from-bottom-4 duration-200">
+              <div className="bg-white border border-stone-200 shadow-xl rounded-sm px-6 py-3 flex items-center gap-4">
+                <span className="text-sm font-medium text-stone-600">
+                  {selectedIndices.size} block{selectedIndices.size > 1 ? 's' : ''} selected
+                </span>
+                <div className="w-px h-4 bg-stone-200" />
+                <button
+                  onClick={deleteSelected}
+                  className="px-4 py-2 text-sm font-medium text-white bg-stone-900 hover:bg-stone-800 rounded-lg transition-colors"
+                >
+                  Delete Selected
+                </button>
+                <button
+                  onClick={() => setSelectedIndices(new Set())}
+                  className="text-stone-400 hover:text-stone-600 text-sm font-medium"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
           {activeTab === "editor" ? (
-            <div id="script-content" className="w-full flex flex-col items-center">
+            <div id="script-content" className="w-full flex flex-col items-center relative">
+              {selectionBox && Math.hypot(selectionBox.startX - selectionBox.endX, selectionBox.startY - selectionBox.endY) > 5 && (
+                <div 
+                  className="absolute border border-emerald-600 bg-emerald-600/5 pointer-events-none z-[100]"
+                  style={{
+                    left: Math.min(selectionBox.startX, selectionBox.endX),
+                    top: Math.min(selectionBox.startY, selectionBox.endY),
+                    width: Math.abs(selectionBox.startX - selectionBox.endX),
+                    height: Math.abs(selectionBox.startY - selectionBox.endY),
+                  }}
+                />
+              )}
               {showTitlePage && titlePage && (
                 <div className="relative w-[8.5in] h-[11in] bg-white shadow-lg mb-8 pl-[1.5in] pr-[1in] font-mono text-[12pt] leading-[1.4] text-black overflow-hidden flex flex-col">
                   <div className="flex-1 flex flex-col items-center justify-center" style={{ paddingBottom: "3in" }}>
@@ -823,11 +1017,11 @@ export default function App() {
                           value={manualInput}
                           onChange={(e) => setManualInput(e.target.value)}
                           placeholder="Type a scene heading, action, or dialogue..."
-                          className="flex-1 bg-stone-50 border border-stone-200 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-sans text-sm"
+                          className="flex-1 bg-stone-50 border border-stone-200 rounded-sm px-4 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-sans text-sm"
                         />
                         <button
                           type="submit"
-                          className="px-4 py-2 bg-stone-900 text-white rounded-lg hover:bg-stone-800 font-medium font-sans text-sm"
+                          className="px-4 py-2 bg-stone-900 text-white rounded-sm hover:bg-stone-800 font-medium font-sans text-sm"
                         >
                           Add
                         </button>
@@ -850,7 +1044,13 @@ export default function App() {
                             transcript={transcript}
                             onAccumulatedTranscriptChange={handleAccumulatedTranscriptChange}
                           />
-                          <ScriptBlock block={block} index={index} blocks={blocks} updateBlocks={updateBlocks} />
+                          <ScriptBlock 
+                            block={block} 
+                            index={index} 
+                            blocks={blocks} 
+                            updateBlocks={updateBlocks} 
+                            isSelected={selectedIndices.has(index)}
+                          />
                         </React.Fragment>
                       ))}
                       {pageIdx === paginateBlocks(blocks).length - 1 && (
@@ -871,11 +1071,11 @@ export default function App() {
                               value={manualInput}
                               onChange={(e) => setManualInput(e.target.value)}
                               placeholder="Type a scene heading, action, or dialogue..."
-                              className="flex-1 bg-stone-50 border border-stone-200 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-sans text-sm"
+                              className="flex-1 bg-stone-50 border border-stone-200 rounded-sm px-4 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-sans text-sm"
                             />
                             <button
                               type="submit"
-                              className="px-4 py-2 bg-stone-900 text-white rounded-lg hover:bg-stone-800 font-medium font-sans text-sm"
+                              className="px-4 py-2 bg-stone-900 text-white rounded-sm hover:bg-stone-800 font-medium font-sans text-sm"
                             >
                               Add
                             </button>
@@ -889,7 +1089,7 @@ export default function App() {
             </div>
           ) : (
             <div className="w-full max-w-3xl">
-              <div className="bg-white p-6 rounded-xl shadow-sm border border-stone-200 mb-6">
+              <div className="bg-white p-6 rounded-sm shadow-sm border border-stone-200 mb-6">
                 <h3 className="text-lg font-medium mb-4">Add Character</h3>
                 <div className="flex gap-4">
                   <input
@@ -897,25 +1097,25 @@ export default function App() {
                     placeholder="Canonical Name (e.g. EMILIO)"
                     value={newCharName}
                     onChange={(e) => setNewCharName(e.target.value)}
-                    className="flex-1 px-4 py-2 border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    className="flex-1 px-4 py-2 border border-stone-300 rounded-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
                   <input
                     type="text"
                     placeholder="Aliases (comma separated, e.g. Em, E)"
                     value={newCharAliases}
                     onChange={(e) => setNewCharAliases(e.target.value)}
-                    className="flex-1 px-4 py-2 border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    className="flex-1 px-4 py-2 border border-stone-300 rounded-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
                   <button
                     onClick={addCharacter}
-                    className="px-6 py-2 bg-stone-900 text-white rounded-lg hover:bg-stone-800 font-medium"
+                    className="px-6 py-2 bg-stone-900 text-white rounded-sm hover:bg-stone-800 font-medium"
                   >
                     Add
                   </button>
                 </div>
               </div>
 
-              <div className="bg-white rounded-xl shadow-sm border border-stone-200 overflow-hidden">
+              <div className="bg-white rounded-sm shadow-sm border border-stone-200 overflow-hidden">
                 <table className="w-full text-left">
                   <thead className="bg-stone-50 border-b border-stone-200">
                     <tr>

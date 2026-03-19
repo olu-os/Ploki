@@ -6,9 +6,10 @@ interface ScriptBlockProps {
   index: number;
   blocks: ParsedBlock[];
   updateBlocks: (newBlocks: ParsedBlock[] | ((prev: ParsedBlock[]) => ParsedBlock[])) => void;
+  isSelected?: boolean;
 }
 
-export const ScriptBlock: React.FC<ScriptBlockProps> = ({ block, index, blocks, updateBlocks }) => {
+export const ScriptBlock: React.FC<ScriptBlockProps> = ({ block, index, blocks, updateBlocks, isSelected }) => {
   const updateBlockParsed = (newParsed: any) => {
     // Delete block if empty
     const isEmpty = typeof newParsed === "string"
@@ -24,14 +25,18 @@ export const ScriptBlock: React.FC<ScriptBlockProps> = ({ block, index, blocks, 
   };
 
   return (
-    <div key={index} className="group relative">
+    <div 
+      key={index} 
+      className={`group relative transition-colors duration-200 rounded-xs px-2 -mx-2 ${isSelected ? 'bg-emerald-50/80 ring-1 ring-emerald-700' : ''}`}
+      data-block-index={index}
+    >
       <button
         onClick={() => {
           const newBlocks = [...blocks];
           newBlocks.splice(index, 1);
           updateBlocks(newBlocks);
         }}
-        className="absolute -right-12 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 transition-opacity p-2 text-xl"
+        className="absolute -left-8 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 transition-opacity p-4 min-w-10 min-h-10 flex items-center justify-center text-xl"
         title="Delete block"
       >
         ×
@@ -44,7 +49,7 @@ export const ScriptBlock: React.FC<ScriptBlockProps> = ({ block, index, blocks, 
             const val = e.currentTarget.innerText.trim();
             if (val !== block.parsed) updateBlockParsed(val);
           }}
-          className="uppercase my-2 text-black font-bold text-center underline outline-none focus:bg-stone-100 px-1 rounded transition-colors cursor-text"
+          className="uppercase my-2 text-black font-bold text-center underline outline-none focus:bg-stone-100 px-1 rounded-xs transition-colors cursor-text"
         >
           {block.parsed}
         </div>
@@ -57,7 +62,7 @@ export const ScriptBlock: React.FC<ScriptBlockProps> = ({ block, index, blocks, 
             const val = e.currentTarget.innerText.trim();
             if (val !== block.parsed) updateBlockParsed(val);
           }}
-          className="uppercase my-2 text-black font-bold outline-none focus:bg-stone-100 px-1 rounded transition-colors cursor-text"
+          className="uppercase my-2 text-black font-bold outline-none focus:bg-stone-100 px-1 rounded-xs transition-colors cursor-text"
         >
           {block.parsed}
         </div>
@@ -70,7 +75,7 @@ export const ScriptBlock: React.FC<ScriptBlockProps> = ({ block, index, blocks, 
             const val = e.currentTarget.innerText.trim();
             if (val !== block.parsed) updateBlockParsed(val);
           }}
-          className="uppercase text-right my-2 text-black outline-none focus:bg-stone-100 px-1 rounded transition-colors cursor-text"
+          className="uppercase text-right my-2 text-black outline-none focus:bg-stone-100 px-1 rounded-xs transition-colors cursor-text"
         >
           {block.parsed}
         </div>
@@ -88,7 +93,7 @@ export const ScriptBlock: React.FC<ScriptBlockProps> = ({ block, index, blocks, 
                     updateBlockParsed({ ...block.parsed, speaker: val });
                   }
                 }}
-                className="outline-none focus:bg-stone-100 px-1 rounded transition-colors cursor-text inline-block min-w-[50px]"
+                className="outline-none focus:bg-stone-100 px-1 rounded-xs transition-colors cursor-text inline-block min-w-[50px]"
               >
                 {block.parsed.speaker}
               </div>
@@ -113,7 +118,7 @@ export const ScriptBlock: React.FC<ScriptBlockProps> = ({ block, index, blocks, 
                       updateBlockParsed({ ...block.parsed, parenthetical: val });
                     }
                   }}
-                  className="outline-none focus:bg-stone-100 px-1 rounded transition-colors cursor-text inline-block min-w-[30px]"
+                  className="outline-none focus:bg-stone-100 px-1 rounded-xs transition-colors cursor-text inline-block min-w-[30px]"
                 >
                   ({block.parsed.parenthetical})
                 </div>
@@ -138,7 +143,7 @@ export const ScriptBlock: React.FC<ScriptBlockProps> = ({ block, index, blocks, 
                     updateBlockParsed({ ...block.parsed, dialogue: val });
                   }
                 }}
-                className="outline-none focus:bg-stone-100 px-1 rounded transition-colors cursor-text block w-full"
+                className="outline-none focus:bg-stone-100 px-1 rounded-xs transition-colors cursor-text block w-full"
               >
                 {block.parsed.dialogue}
               </div>
@@ -154,7 +159,7 @@ export const ScriptBlock: React.FC<ScriptBlockProps> = ({ block, index, blocks, 
             const val = e.currentTarget.innerText.trim();
             if (val !== block.parsed) updateBlockParsed(val);
           }}
-          className="my-2 text-stone-950 text-justify outline-none focus:bg-stone-100 px-1 rounded transition-colors cursor-text"
+          className="my-2 text-stone-950 text-justify outline-none focus:bg-stone-100 px-1 rounded-xs transition-colors cursor-text"
         >
           {block.parsed}
         </div>
