@@ -234,6 +234,7 @@ export default function App() {
   const [wordCount, setWordCount] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
   const [insertionIndex, setInsertionIndex] = useState<number | null>(null);
+  const insertionIndexRef = useRef<number | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean;
     message: string;
@@ -444,6 +445,8 @@ export default function App() {
               setAccumulatedTranscript("");
             }
             setTranscript("");
+            setInsertionIndex(null);
+            insertionIndexRef.current = null;
           }
           azureRecognizerRef.current?.close();
           azureRecognizerRef.current = null;
@@ -526,6 +529,11 @@ export default function App() {
           for (const seg of segments) {
             processSpeechRef.current(seg);
           }
+          if (pendingStopRef.current) {
+            pendingStopRef.current = false;
+            setInsertionIndex(null);
+            insertionIndexRef.current = null;
+          }
           return;
         }
 
@@ -539,6 +547,8 @@ export default function App() {
           processSpeechRef.current(accumulatedTextRef.current);
           accumulatedTextRef.current = "";
           setAccumulatedTranscript("");
+          setInsertionIndex(null);
+          insertionIndexRef.current = null;
         }
       }
 
@@ -575,6 +585,7 @@ export default function App() {
     if (isListening) {
       if (index !== undefined && index !== insertionIndex) {
         setInsertionIndex(index);
+        insertionIndexRef.current = index;
         return;
       }
 
@@ -583,14 +594,15 @@ export default function App() {
       setTranscript(""); // Clear interim display; final result will come from Azure
       recognitionRef.current?.stop();
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-      setInsertionIndex(null);
     } else {
       // Start 20-second silence timer when listening begins
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       silenceTimerRef.current = setTimeout(() => {
         if (isListeningRef.current) toggleListeningRef.current();
       }, 20000);
-      setInsertionIndex(index !== undefined ? index : blocks.length);
+      const idx = index !== undefined ? index : blocks.length;
+      setInsertionIndex(idx);
+      insertionIndexRef.current = idx;
       try {
         recognitionRef.current?.start();
         isListeningRef.current = true;
@@ -616,13 +628,15 @@ export default function App() {
 
     updateBlocks((prev) => {
       const newBlocks = [...prev];
-      const index = insertionIndex !== null ? insertionIndex : prev.length;
+      const index = insertionIndexRef.current !== null ? insertionIndexRef.current : prev.length;
       newBlocks.splice(index, 0, data);
       return newBlocks;
     });
 
-    if (insertionIndex !== null) {
-      setInsertionIndex(prev => prev !== null ? prev + 1 : null);
+    if (insertionIndexRef.current !== null) {
+      const next = insertionIndexRef.current + 1;
+      insertionIndexRef.current = next;
+      setInsertionIndex(next);
     }
   };
   processSpeechRef.current = processSpeech;
@@ -930,11 +944,8 @@ export default function App() {
         >
           {selectedIndices.size > 0 && (
             <div className="fixed bottom-8 right-8 z-[110] animate-in fade-in slide-in-from-bottom-4 duration-200">
-              <div className="bg-white border border-stone-200 shadow-xl rounded-sm px-6 py-3 flex items-center gap-4">
-                <span className="text-sm font-medium text-stone-600">
-                  {selectedIndices.size} block{selectedIndices.size > 1 ? 's' : ''} selected
-                </span>
-                <div className="w-px h-4 bg-stone-200" />
+              <div className="bg-white border border-stone-200 shadow-xl rounded-lg px-6 py-3 flex items-center gap-4">
+
                 <button
                   onClick={deleteSelected}
                   className="px-4 py-2 text-sm font-medium text-white bg-stone-900 hover:bg-stone-800 rounded-lg transition-colors"
