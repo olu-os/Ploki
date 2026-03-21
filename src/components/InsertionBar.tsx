@@ -58,7 +58,7 @@ export const InsertionBar: React.FC<InsertionBarProps> = ({
               Scene Heading
             </button>
             <button 
-              onClick={() => { onInsert(index, "action", "[Action description]"); setShowMenu(false); }}
+              onClick={() => { onInsert(index, "action", "Action"); setShowMenu(false); }}
               className="w-full text-left px-3 py-1.5 text-xs hover:bg-stone-50"
             >
               Action

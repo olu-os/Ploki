@@ -27,11 +27,14 @@ export default function App() {
   const processSpeechRef = useRef<(text: string) => void>(() => {});
   const charactersRef = useRef<Character[]>([]);
   const [blocks, setBlocks] = useState<ParsedBlock[]>([]);
-  const [history, setHistory] = useState<ParsedBlock[][]>([]);
-  const [future, setFuture] = useState<ParsedBlock[][]>([]);
+  const [history, setHistory] = useState<{ blocks: ParsedBlock[]; titlePage: TitlePageData | null }[]>([]);
+  const [future, setFuture] = useState<{ blocks: ParsedBlock[]; titlePage: TitlePageData | null }[]>([]);
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [versions, setVersions] = useState<ProjectVersion[]>([]);
   const [titlePage, setTitlePage] = useState<TitlePageData | null>(null);
+  const titlePageRef = useRef<TitlePageData | null>(null);
+  titlePageRef.current = titlePage;
+
   const [showTitlePage, setShowTitlePage] = useState(false);
   const [loadingVersions, setLoadingVersions] = useState(false);
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
@@ -45,8 +48,19 @@ export default function App() {
   const updateBlocks = (newBlocks: ParsedBlock[] | ((prev: ParsedBlock[]) => ParsedBlock[])) => {
     setBlocks(prev => {
       const next = typeof newBlocks === 'function' ? newBlocks(prev) : newBlocks;
-      setHistory(h => [...h.slice(-49), prev]);
+      setHistory(h => [...h.slice(-49), { blocks: prev, titlePage: titlePageRef.current }]);
       setFuture([]);
+      return next;
+    });
+  };
+
+  const updateTitlePage = (update: Partial<TitlePageData> | ((prev: TitlePageData | null) => TitlePageData | null)) => {
+    setTitlePage(prev => {
+      const next = typeof update === 'function' ? update(prev) : (prev ? { ...prev, ...update } : null);
+      if (next !== prev) {
+        setHistory(h => [...h.slice(-49), { blocks, titlePage: prev }]);
+        setFuture([]);
+      }
       return next;
     });
   };
@@ -54,17 +68,19 @@ export default function App() {
   const undo = () => {
     if (history.length === 0) return;
     const previous = history[history.length - 1];
-    setFuture(f => [blocks, ...f]);
+    setFuture(f => [{ blocks, titlePage }, ...f]);
     setHistory(h => h.slice(0, -1));
-    setBlocks(previous);
+    setBlocks(previous.blocks);
+    setTitlePage(previous.titlePage);
   };
 
   const redo = () => {
     if (future.length === 0) return;
     const next = future[0];
-    setHistory(h => [...h, blocks]);
+    setHistory(h => [...h, { blocks, titlePage }]);
     setFuture(f => f.slice(1));
-    setBlocks(next);
+    setBlocks(next.blocks);
+    setTitlePage(next.titlePage);
   };
 
   const undoRef = useRef(undo);
@@ -766,14 +782,14 @@ export default function App() {
                 setCurrentProject({ ...currentProject, title: newTitle });
                 setProjects((prev) => prev.map(p => p.id === currentProject.id ? { ...p, title: newTitle } : p));
               }}
-              className="text-lg font-medium bg-transparent border-none focus:outline-none focus:ring-0 w-1/2"
+              className="text-lg font-medium bg-transparent border-none focus:outline-none focus:ring-0 flex-1 min-w-0 mr-3"
               placeholder="Script Title"
             />
           ) : (
             <h2 className="text-lg font-medium">Empty</h2>
           )}
           
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-shrink-0">
             {activeTab === "editor" && (
               <>
                 <div className="flex items-center gap-1 mr-2 border-r border-stone-200 pr-2">
@@ -954,20 +970,20 @@ export default function App() {
                     <div
                       contentEditable
                       suppressContentEditableWarning
-                      onBlur={e => { const v = e.currentTarget.innerText.trim(); setTitlePage(prev => prev ? { ...prev, title: v } : prev); }}
+                      onBlur={e => { const v = e.currentTarget.innerText.trim(); updateTitlePage({ title: v }); }}
                       className="font-bold underline uppercase text-center outline-none min-w-[4px] empty:before:content-['Title'] empty:before:text-stone-300 empty:before:normal-case empty:before:no-underline"
                     >{titlePage.title}</div>
                     <div
                       contentEditable
                       suppressContentEditableWarning
-                      onBlur={e => { const v = e.currentTarget.innerText.trim(); setTitlePage(prev => prev ? { ...prev, subtitle: v } : prev); }}
+                      onBlur={e => { const v = e.currentTarget.innerText.trim(); updateTitlePage({ subtitle: v }); }}
                       className="text-center outline-none mt-3 min-w-[4px] empty:before:content-['Subtitle_(optional)'] empty:before:text-stone-300"
                     >{titlePage.subtitle}</div>
                     <div className="text-center mt-4">Written by</div>
                     <div
                       contentEditable
                       suppressContentEditableWarning
-                      onBlur={e => { const v = e.currentTarget.innerText.trim(); setTitlePage(prev => prev ? { ...prev, author: v } : prev); }}
+                      onBlur={e => { const v = e.currentTarget.innerText.trim(); updateTitlePage({ author: v }); }}
                       className="text-center outline-none mt-1 min-w-[4px] empty:before:content-['Author_name'] empty:before:text-stone-300"
                     >{titlePage.author}</div>
                   </div>
@@ -975,13 +991,13 @@ export default function App() {
                     <div
                       contentEditable
                       suppressContentEditableWarning
-                      onBlur={e => { const v = e.currentTarget.innerText.trim(); setTitlePage(prev => prev ? { ...prev, agencyName: v } : prev); }}
+                      onBlur={e => { const v = e.currentTarget.innerText.trim(); updateTitlePage({ agencyName: v }); }}
                       className="outline-none min-w-[4px] empty:before:content-['Agency_name_(optional)'] empty:before:text-stone-300"
                     >{titlePage.agencyName}</div>
                     <div
                       contentEditable
                       suppressContentEditableWarning
-                      onBlur={e => { const v = e.currentTarget.innerText.trim(); setTitlePage(prev => prev ? { ...prev, agencyAddress: v } : prev); }}
+                      onBlur={e => { const v = e.currentTarget.innerText.trim(); updateTitlePage({ agencyAddress: v }); }}
                       className="outline-none min-w-[4px] empty:before:content-['Agency_address_(optional)'] empty:before:text-stone-300"
                     >{titlePage.agencyAddress}</div>
                   </div>
