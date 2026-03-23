@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Mic, MicOff, Save, FileText, Users, Plus, Download, Undo, Redo, LogOut, History } from "lucide-react";
+import { Mic, MicOff, Save, FileText, Users, Plus, Download, Undo, Redo, LogOut, History, Menu, X } from "lucide-react";
 import { Project, Character, ParsedBlock, ProjectVersion, TitlePageData } from "./types";
 import * as SpeechSDK from "microsoft-cognitiveservices-speech-sdk";
 import { supabase } from "./lib/supabase";
@@ -37,6 +37,7 @@ export default function App() {
 
   const [showTitlePage, setShowTitlePage] = useState(false);
   const [loadingVersions, setLoadingVersions] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
   const [selectionBox, setSelectionBox] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
   const isDraggingRef = useRef(false);
@@ -435,7 +436,6 @@ export default function App() {
     const stopAzure = () => {
       if (azureRecognizerRef.current) {
         azureRecognizerRef.current.stopContinuousRecognitionAsync(() => {
-          // If no `recognized` event fired (silence/no speech), process whatever was accumulated
           if (pendingStopRef.current) {
             pendingStopRef.current = false;
             const textToProcess = accumulatedTextRef.current;
@@ -466,16 +466,13 @@ export default function App() {
 
         const speechConfig = SpeechSDK.SpeechConfig.fromSubscription(key, region);
         speechConfig.speechRecognitionLanguage = "en-US";
-        // Request detailed output to get access to ITN/Lexical fields if needed
         speechConfig.outputFormat = SpeechSDK.OutputFormat.Detailed;
-        // Explicitly disable punctuation and ITN (Inverse Text Normalization)
         speechConfig.setServiceProperty('punctuation', 'explicit', SpeechSDK.ServicePropertyChannel.UriQueryParameter);
         
         const audioConfig = SpeechSDK.AudioConfig.fromDefaultMicrophoneInput();
         const recognizer = new SpeechSDK.SpeechRecognizer(speechConfig, audioConfig);
         azureRecognizerRef.current = recognizer;
 
-        // Phrase list for character names
         const phraseList = SpeechSDK.PhraseListGrammar.fromRecognizer(recognizer);
         phraseList.addPhrases(["para"]);
         charactersRef.current.forEach(c => {
@@ -583,7 +580,7 @@ export default function App() {
 
   const toggleListening = (index?: number) => {
     if (isListening) {
-      if (index !== undefined && index !== insertionIndex) {
+      if (index !== undefined && index !== insertionIndexRef.current) {
         setInsertionIndex(index);
         insertionIndexRef.current = index;
         return;
@@ -626,15 +623,17 @@ export default function App() {
       lastSpeakerRef.current = null;
     }
 
+    const insertAt = insertionIndexRef.current;
+
     updateBlocks((prev) => {
       const newBlocks = [...prev];
-      const index = insertionIndexRef.current !== null ? insertionIndexRef.current : prev.length;
+      const index = insertAt !== null ? insertAt : prev.length;
       newBlocks.splice(index, 0, data);
       return newBlocks;
     });
 
-    if (insertionIndexRef.current !== null) {
-      const next = insertionIndexRef.current + 1;
+    if (insertAt !== null) {
+      const next = insertAt + 1;
       insertionIndexRef.current = next;
       setInsertionIndex(next);
     }
@@ -676,11 +675,18 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-stone-50 font-sans text-stone-900">
+      {/* Sidebar backdrop - mobile only */}
+      {sidebarOpen && (
+        <div className="fixed inset-0 bg-black/40 z-40 md:hidden" onClick={() => setSidebarOpen(false)} />
+      )}
       {/* Sidebar */}
-      <div className="w-64 bg-stone-100 border-r border-stone-200 flex flex-col">
+      <div className={`fixed inset-y-0 left-0 z-50 w-72 bg-stone-100 border-r border-stone-200 flex flex-col transition-transform duration-300 ease-in-out ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} md:relative md:w-64 md:translate-x-0 md:z-auto`}>
         <div className="p-4 border-b border-stone-200 flex items-center gap-2">
           <Mic className="text-emerald-600" />
-          <h1 className="text-xl font-bold tracking-tight">Ploki</h1>
+          <h1 className="text-xl font-bold tracking-tight flex-1">Ploki</h1>
+          <button className="md:hidden p-1 text-stone-400 hover:text-stone-600 rounded" onClick={() => setSidebarOpen(false)}>
+            <X size={20} />
+          </button>
         </div>
         
         <div className="flex-1 overflow-y-auto p-4">
@@ -719,6 +725,7 @@ export default function App() {
                     setHistory([]);
                     setFuture([]);
                     setActiveTab("editor");
+                    setSidebarOpen(false);
                   }}
                   className={`w-full text-left px-3 py-2 pr-10 rounded text-sm flex items-center gap-2 ${
                     currentProject?.id === p.id ? "bg-stone-200 font-medium" : "hover:bg-stone-200/50"
@@ -762,7 +769,7 @@ export default function App() {
             </div>
           </div>
           <button
-            onClick={() => setActiveTab("characters")}
+            onClick={() => { setActiveTab("characters"); setSidebarOpen(false); }}
             className={`w-full flex items-center gap-2 px-3 py-2 rounded text-sm ${
               activeTab === "characters" ? "bg-stone-200 font-medium" : "hover:bg-stone-200/50"
             }`}
@@ -786,157 +793,162 @@ export default function App() {
       {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
-        <header className="h-20 border-b border-stone-200 bg-white flex items-center justify-between px-6">
-          {activeTab === "editor" && currentProject ? (
-            <input
-              type="text"
-              value={currentProject.title}
-              onChange={(e) => {
-                const newTitle = e.target.value;
-                setCurrentProject({ ...currentProject, title: newTitle });
-                setProjects((prev) => prev.map(p => p.id === currentProject.id ? { ...p, title: newTitle } : p));
-              }}
-              className="text-lg font-medium bg-transparent border-none focus:outline-none focus:ring-0 flex-1 min-w-0 mr-3"
-              placeholder="Script Title"
-            />
-          ) : (
-            <h2 className="text-lg font-medium">Empty</h2>
-          )}
-          
-          <div className="flex items-center gap-3 flex-shrink-0">
-            {activeTab === "editor" && (
-              <>
-                <div className="flex items-center gap-1 mr-2 border-r border-stone-200 pr-2">
-                  <button
-                    onClick={undo}
-                    disabled={history.length === 0}
-                    className="p-1.5 text-stone-500 hover:bg-stone-100 rounded-md disabled:opacity-30 transition-colors"
-                    title="Undo (Ctrl+Z)"
-                  >
-                    <Undo size={18} />
-                  </button>
-                  <button
-                    onClick={redo}
-                    disabled={future.length === 0}
-                    className="p-1.5 text-stone-500 hover:bg-stone-100 rounded-md disabled:opacity-30 transition-colors"
-                    title="Redo (Ctrl+Shift+Z)"
-                  >
-                    <Redo size={18} />
-                  </button>
-                </div>
-                <button
-                  onClick={() => {
-                    requestConfirm("Are you sure you want to clear the script?", async () => {
-                      updateBlocks([]);
-                      if (currentProject) {
-                        await supabase
-                          .from("projects")
-                          .update({ content: "[]", updated_at: new Date().toISOString() })
-                          .eq("id", currentProject.id);
-                        setCurrentProject({ ...currentProject, content: "[]" });
-                        fetchProjects();
-                      }
-                    });
-                  }}
-                  className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50 rounded-md transition-colors"
-                >
-                  Clear
-                </button>
+        <header className="border-b border-stone-200 bg-white flex flex-wrap md:flex-nowrap md:h-16 items-center px-3 md:px-6 gap-x-2 py-2 md:py-0">
+          {/* Hamburger - mobile only */}
+          <button
+            className="order-1 md:hidden flex-shrink-0 p-2 -ml-1 text-stone-500 hover:bg-stone-100 rounded-md"
+            onClick={() => setSidebarOpen(true)}
+          >
+            <Menu size={20} />
+          </button>
 
-                <div className="flex bg-stone-100 rounded-md overflow-hidden">
-                  <button
-                    onClick={() => {
-                      requestConfirm("Are you sure you want to export as PDF?", () => {
-                        if (currentProject) exportToPdf({ title: currentProject.title, blocks, showTitlePage, titlePage });
-                      });
-                    }}
-                    className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-stone-600 hover:bg-stone-200 transition-colors border-r border-stone-200"
-                    title="Export as PDF"
-                  >
-                    <Download size={16} />
-                    PDF
-                  </button>
-                  <button
-                    onClick={() => {
-                      requestConfirm("Are you sure you want to export as Text?", () => {
-                        if (currentProject) exportToTxt({ title: currentProject.title, blocks, showTitlePage, titlePage });
-                      });
-                    }}
-                    className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-stone-600 hover:bg-stone-200 transition-colors"
-                    title="Export as Text"
-                  >
-                    TXT
-                  </button>
-                </div>
-                <button
-                  onClick={() => {
-                    requestConfirm("Are you sure you want to save the script?", saveProject);
-                  }}
-                  disabled={isSaving}
-                  className={`flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                    isSaving ? "bg-emerald-50 text-emerald-600" : "text-stone-600 hover:bg-stone-100"
-                  }`}
-                >
-                  <Save size={16} />
-                  {isSaving ? "Saved!" : "Save"}
-                </button>
-                <button
-                  onClick={() => {
-                    setShowVersionHistory(v => !v);
-                    if (!showVersionHistory && currentProject) fetchVersions(currentProject.id);
-                  }}
-                  className={`flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                    showVersionHistory ? "bg-stone-200 text-stone-900" : "text-stone-600 hover:bg-stone-100"
-                  }`}
-                >
-                  <History size={16} />
-                  History
-                </button>
-                <button
-                  onClick={() => {
-                    if (!showTitlePage) {
-                      setShowTitlePage(true);
-                      if (!titlePage) setTitlePage({ title: currentProject?.title || "", subtitle: "", author: "", agencyName: "", agencyAddress: "" });
-                    } else {
-                      setShowTitlePage(false);
-                    }
-                  }}
-                  className={`flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                    showTitlePage ? "bg-stone-200 text-stone-900" : "text-stone-600 hover:bg-stone-100"
-                  }`}
-                >
-                  <FileText size={16} />
-                  Title Page
-                </button>
-                <button
-                  onClick={() => toggleListening()}
-                  className={`flex items-center gap-2 px-4 py-1 text-sm font-medium rounded-full transition-colors ${
-                    isListening
-                      ? "bg-red-100 text-red-700 hover:bg-red-200"
-                      : "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
-                  }`}
-                  title={isListening ? "Stop Listening (Ctrl+L)" : "Start Listening (Ctrl+L)"}
-                >
-                  {isListening ? (
-                    <>
-                      <MicOff size={16} />
-                      Stop Listening
-                    </>
-                  ) : (
-                    <>
-                      <Mic size={16} />
-                      Start Listening
-                    </>
-                  )}
-                </button>
-              </>
+          {/* Title */}
+          <div className="order-2 flex-1 min-w-0">
+            {activeTab === "editor" && currentProject ? (
+              <input
+                type="text"
+                value={currentProject.title}
+                onChange={(e) => {
+                  const newTitle = e.target.value;
+                  setCurrentProject({ ...currentProject, title: newTitle });
+                  setProjects((prev) => prev.map(p => p.id === currentProject.id ? { ...p, title: newTitle } : p));
+                }}
+                className="w-full text-base md:text-lg font-medium bg-transparent border-none focus:outline-none focus:ring-0"
+                placeholder="Script Title"
+              />
+            ) : (
+              <h2 className="text-lg font-medium">Empty</h2>
             )}
           </div>
+
+          {/* Mic button — top row on mobile and desktop */}
+          {activeTab === "editor" && (
+            <button
+              onClick={() => toggleListening()}
+              className={`order-3 md:order-4 flex-shrink-0 flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-full transition-colors ${
+                isListening
+                  ? "bg-red-100 text-red-700 hover:bg-red-200"
+                  : "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
+              }`}
+              title={isListening ? "Stop Listening (Ctrl+.)" : "Start Listening (Ctrl+.)"}
+            >
+              {isListening ? <MicOff size={16} /> : <Mic size={16} />}
+              <span className="md:hidden">{isListening ? "Stop" : "Listen"}</span>
+              <span className="hidden md:inline">{isListening ? "Stop Listening" : "Start Listening"}</span>
+            </button>
+          )}
+
+          {/* Action buttons — wraps to row 2 on mobile, stays inline on desktop */}
+          {activeTab === "editor" && (
+            <div className="order-4 md:order-3 w-full md:w-auto md:flex-shrink-0 flex items-center gap-1 md:gap-2 overflow-x-auto pb-1 md:pb-0">
+              <div className="flex items-center gap-0.5 border-r border-stone-200 pr-2 mr-0.5 flex-shrink-0">
+                <button
+                  onClick={undo}
+                  disabled={history.length === 0}
+                  className="p-2 text-stone-500 hover:bg-stone-100 rounded-md disabled:opacity-30 transition-colors"
+                  title="Undo (Ctrl+Z)"
+                >
+                  <Undo size={16} />
+                </button>
+                <button
+                  onClick={redo}
+                  disabled={future.length === 0}
+                  className="p-2 text-stone-500 hover:bg-stone-100 rounded-md disabled:opacity-30 transition-colors"
+                  title="Redo (Ctrl+Shift+Z)"
+                >
+                  <Redo size={16} />
+                </button>
+              </div>
+              <button
+                onClick={() => {
+                  requestConfirm("Are you sure you want to clear the script?", async () => {
+                    updateBlocks([]);
+                    if (currentProject) {
+                      await supabase
+                        .from("projects")
+                        .update({ content: "[]", updated_at: new Date().toISOString() })
+                        .eq("id", currentProject.id);
+                      setCurrentProject({ ...currentProject, content: "[]" });
+                      fetchProjects();
+                    }
+                  });
+                }}
+                className="flex items-center gap-1.5 px-2.5 py-2 text-sm font-medium text-red-600 hover:bg-red-50 rounded-md transition-colors flex-shrink-0"
+              >
+                Clear
+              </button>
+              <div className="flex bg-stone-100 rounded-md overflow-hidden flex-shrink-0">
+                <button
+                  onClick={() => {
+                    requestConfirm("Are you sure you want to export as PDF?", () => {
+                      if (currentProject) exportToPdf({ title: currentProject.title, blocks, showTitlePage, titlePage });
+                    });
+                  }}
+                  className="flex items-center gap-1.5 px-2.5 py-2 text-sm font-medium text-stone-600 hover:bg-stone-200 transition-colors border-r border-stone-200"
+                  title="Export as PDF"
+                >
+                  <Download size={16} />
+                  <span className="hidden md:inline">PDF</span>
+                </button>
+                <button
+                  onClick={() => {
+                    requestConfirm("Are you sure you want to export as Text?", () => {
+                      if (currentProject) exportToTxt({ title: currentProject.title, blocks, showTitlePage, titlePage });
+                    });
+                  }}
+                  className="flex items-center gap-1.5 px-2.5 py-2 text-sm font-medium text-stone-600 hover:bg-stone-200 transition-colors"
+                  title="Export as Text"
+                >
+                  TXT
+                </button>
+              </div>
+              <button
+                onClick={() => {
+                  requestConfirm("Are you sure you want to save the script?", saveProject);
+                }}
+                disabled={isSaving}
+                className={`flex items-center gap-1.5 px-2.5 py-2 text-sm font-medium rounded-md transition-colors flex-shrink-0 ${
+                  isSaving ? "bg-emerald-50 text-emerald-600" : "text-stone-600 hover:bg-stone-100"
+                }`}
+              >
+                <Save size={16} />
+                <span className="hidden md:inline">{isSaving ? "Saved!" : "Save"}</span>
+              </button>
+              <button
+                onClick={() => {
+                  setShowVersionHistory(v => !v);
+                  if (!showVersionHistory && currentProject) fetchVersions(currentProject.id);
+                }}
+                className={`flex items-center gap-1.5 px-2.5 py-2 text-sm font-medium rounded-md transition-colors flex-shrink-0 ${
+                  showVersionHistory ? "bg-stone-200 text-stone-900" : "text-stone-600 hover:bg-stone-100"
+                }`}
+              >
+                <History size={16} />
+                <span className="hidden md:inline">History</span>
+              </button>
+              <button
+                onClick={() => {
+                  if (!showTitlePage) {
+                    setShowTitlePage(true);
+                    if (!titlePage) setTitlePage({ title: currentProject?.title || "", subtitle: "", author: "", agencyName: "", agencyAddress: "" });
+                  } else {
+                    setShowTitlePage(false);
+                  }
+                }}
+                className={`flex items-center gap-1.5 px-2.5 py-2 text-sm font-medium rounded-md transition-colors flex-shrink-0 ${
+                  showTitlePage ? "bg-stone-100 text-stone-900" : "text-stone-600 hover:bg-stone-100"
+                }`}
+              >
+                <FileText size={16} />
+                <span className="hidden md:inline">Title Page</span>
+              </button>
+            </div>
+          )}
         </header>
 
         {/* Workspace */}
         <main 
-          className="flex-1 overflow-y-auto bg-stone-200 p-8 flex flex-col items-center relative select-none"
+          className="flex-1 overflow-y-auto bg-stone-200 px-4 py-4 md:p-8 flex flex-col items-center relative select-none"
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}

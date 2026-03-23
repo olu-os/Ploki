@@ -118,6 +118,20 @@ export function parseNLP(text: string, characters: Character[], lastSpeaker: str
       // Action: capitalize first letter
       type = "action";
       parsedText = processedText.charAt(0).toUpperCase() + processedText.slice(1);
+
+      // First character capitalized for known character names within action text
+      if (characters && characters.length > 0) {
+        for (const char of characters) {
+          const titleCased = char.canonical_name
+            .toLowerCase()
+            .replace(/\b\w/g, c => c.toUpperCase());
+          try {
+            const regex = new RegExp(`\\b${char.canonical_name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, "gi");
+            parsedText = parsedText.replace(regex, titleCased);
+          } catch (e) {
+          }
+        }
+      }
     }
   }
   return { type, parsed: parsedText, original: text, isContinued };

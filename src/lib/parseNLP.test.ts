@@ -81,7 +81,7 @@ describe('parseNLP', () => {
     expect(result.type).toBe('dialogue_block');
     expect(result.parsed).toEqual({
       speaker: 'EMILIO',
-      parenthetical: '',
+      parenthetical: 'whispering',
       dialogue: 'I am secretly a spy'
     });
   });
@@ -98,5 +98,38 @@ describe('parseNLP', () => {
     const result = parseNLP('The wind blows through the trees.', [], null);
     expect(result.type).toBe('action');
     expect(result.parsed).toBe('The wind blows through the trees.');
+  });
+
+  it('should title-case a character name in action text', () => {
+    const result = parseNLP('emilio walks into the room', mockCharacters, null);
+    expect(result.type).toBe('action');
+    expect(result.parsed).toBe('Emilio walks into the room');
+  });
+
+  it('should title-case a character name mid-sentence in action text', () => {
+    const result = parseNLP('the door opens and emilio enters', mockCharacters, null);
+    expect(result.type).toBe('action');
+    expect(result.parsed).toBe('The door opens and Emilio enters');
+  });
+
+  it('should title-case multiple character names in action text', () => {
+    const result = parseNLP('emilio looks at cassandra', mockCharacters, null);
+    expect(result.type).toBe('action');
+    expect(result.parsed).toBe('Emilio looks at Cassandra');
+  });
+
+  it('should title-case a character name when referred to by alias in action text', () => {
+    const result = parseNLP('cass stares at the wall', mockCharacters, null);
+    expect(result.type).toBe('action');
+    expect(result.parsed).toBe('Cassandra stares at the wall');
+  });
+
+  it('should title-case each word of a multi-word character name in action text', () => {
+    const multiWordChars: Character[] = [
+      { id: '3', user_id: '1', canonical_name: 'MARY JANE', aliases: '' }
+    ];
+    const result = parseNLP('mary jane runs down the hall', multiWordChars, null);
+    expect(result.type).toBe('action');
+    expect(result.parsed).toBe('Mary Jane runs down the hall');
   });
 });
