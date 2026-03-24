@@ -1134,11 +1134,11 @@ export default function App() {
                           value={manualInput}
                           onChange={(e) => setManualInput(e.target.value)}
                           placeholder="Type a scene heading, action, or dialogue..."
-                          className="flex-1 bg-stone-50 border border-stone-200 rounded-sm px-4 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-sans text-sm"
+                          className="flex-1 bg-stone-50 border border-stone-200 rounded-sm px-4 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-sans text-base"
                         />
                         <button
                           type="submit"
-                          className="px-4 py-2 bg-stone-900 text-white rounded-sm hover:bg-stone-800 font-medium font-sans text-sm"
+                          className="px-4 py-2 bg-stone-900 text-white rounded-sm hover:bg-stone-800 font-medium font-sans text-base"
                         >
                           Add
                         </button>
@@ -1188,11 +1188,11 @@ export default function App() {
                               value={manualInput}
                               onChange={(e) => setManualInput(e.target.value)}
                               placeholder="Type a scene heading, action, or dialogue..."
-                              className="flex-1 bg-stone-50 border border-stone-200 rounded-sm px-4 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-sans text-sm"
+                              className="flex-1 bg-stone-50 border border-stone-200 rounded-sm px-4 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-sans text-base"
                             />
                             <button
                               type="submit"
-                              className="px-4 py-2 bg-stone-900 text-white rounded-sm hover:bg-stone-800 font-medium font-sans text-sm"
+                              className="px-4 py-2 bg-stone-900 text-white rounded-sm hover:bg-stone-800 font-medium font-sans text-base"
                             >
                               Add
                             </button>
