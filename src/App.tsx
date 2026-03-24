@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Mic, MicOff, Save, FileText, Users, Plus, Download, Undo, Redo, LogOut, History, Menu, X } from "lucide-react";
+import { Mic, MicOff, Save, FileText, Users, Plus, Download, Undo, Redo, LogOut, History, Menu, X, Trash2 } from "lucide-react";
 import { Project, Character, ParsedBlock, ProjectVersion, TitlePageData } from "./types";
 import * as SpeechSDK from "microsoft-cognitiveservices-speech-sdk";
 import { supabase } from "./lib/supabase";
@@ -410,6 +410,15 @@ export default function App() {
   const autoSaveTimerRef = useRef<any>(null);
   const lastSavedContentRef = useRef<string>("");
   const lastSavedTitleRef = useRef<string>("");
+
+  // Refs so the flush-on-unload handler always sees the latest values
+  const latestBlocksRef = useRef(blocks);
+  const latestProjectRef = useRef(currentProject);
+  const latestTitlePageRef = useRef(titlePage);
+  useEffect(() => { latestBlocksRef.current = blocks; }, [blocks]);
+  useEffect(() => { latestProjectRef.current = currentProject; }, [currentProject]);
+  useEffect(() => { latestTitlePageRef.current = titlePage; }, [titlePage]);
+
   useEffect(() => {
     if (!currentProject || blocks === undefined) return;
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
@@ -430,6 +439,35 @@ export default function App() {
     }, 1500);
     return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current); };
   }, [blocks, currentProject?.title, currentProject?.id, titlePage]);
+
+  // Flush any unsaved changes immediately when the page is hidden or unloaded
+  useEffect(() => {
+    const flush = () => {
+      const proj = latestProjectRef.current;
+      const blks = latestBlocksRef.current;
+      const tp = latestTitlePageRef.current;
+      if (!proj || blks === undefined) return;
+      const content = JSON.stringify(blks);
+      if (content === lastSavedContentRef.current && proj.title === lastSavedTitleRef.current) return;
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
+      lastSavedContentRef.current = content;
+      lastSavedTitleRef.current = proj.title;
+      supabase
+        .from("projects")
+        .update({ content, title: proj.title, title_page: tp, updated_at: new Date().toISOString() })
+        .eq("id", proj.id);
+    };
+    const handleVisibilityChange = () => { if (document.visibilityState === "hidden") flush(); };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pagehide", flush);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pagehide", flush);
+    };
+  }, []);
 
   // Speech Recognition Setup (Azure)
   useEffect(() => {
@@ -456,18 +494,18 @@ export default function App() {
 
     const startAzure = async (onTranscript: (text: string, isFinal: boolean) => void) => {
       try {
-        const key = import.meta.env.VITE_AZURE_SPEECH_KEY;
-        const region = import.meta.env.VITE_AZURE_SPEECH_REGION;
-
-        if (!key || !region) {
-          console.error("Azure credentials missing.");
+        const tokenRes = await fetch("/api/speech-token");
+        if (!tokenRes.ok) {
+          console.error("Failed to fetch Azure speech token.");
           return;
         }
+        const { token, region } = await tokenRes.json();
 
-        const speechConfig = SpeechSDK.SpeechConfig.fromSubscription(key, region);
+        const speechConfig = SpeechSDK.SpeechConfig.fromAuthorizationToken(token, region);
         speechConfig.speechRecognitionLanguage = "en-US";
         speechConfig.outputFormat = SpeechSDK.OutputFormat.Detailed;
         speechConfig.setServiceProperty('punctuation', 'explicit', SpeechSDK.ServicePropertyChannel.UriQueryParameter);
+        speechConfig.setServiceProperty('itn', 'true', SpeechSDK.ServicePropertyChannel.UriQueryParameter);
         
         const audioConfig = SpeechSDK.AudioConfig.fromDefaultMicrophoneInput();
         const recognizer = new SpeechSDK.SpeechRecognizer(speechConfig, audioConfig);
@@ -485,7 +523,15 @@ export default function App() {
         };
         recognizer.recognized = (s, e) => {
           if (e.result.reason === SpeechSDK.ResultReason.RecognizedSpeech) {
-            onTranscript(e.result.text, true);
+            let text = e.result.text;
+            try {
+              const json = e.result.properties.getProperty(SpeechSDK.PropertyId.SpeechServiceResponse_JsonResult);
+              if (json) {
+                const parsed = JSON.parse(json);
+                text = parsed?.NBest?.[0]?.Lexical ?? text;
+              }
+            } catch {}
+            onTranscript(text, true);
           }
         };
 
@@ -507,7 +553,7 @@ export default function App() {
         const lowerText = newFinalText.toLowerCase();
 
         // Voice command: clear accumulated line
-        if (lowerText.includes("clear line") || lowerText.includes("clear that") || lowerText.includes("delete line") || lowerText.includes("scratch that")) {
+        if (lowerText.includes("clear line") || lowerText.includes("clear that") || lowerText.includes("delete line") || lowerText.includes("claire line") || lowerText.includes("clear mine")) {
           accumulatedTextRef.current = "";
           setAccumulatedTranscript("");
           setTranscript("");
@@ -793,7 +839,7 @@ export default function App() {
       {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
-        <header className="border-b border-stone-200 bg-white flex flex-wrap md:flex-nowrap md:h-16 items-center px-3 md:px-6 gap-x-2 py-2 md:py-0">
+        <header className="border-b border-stone-200 bg-white flex flex-wrap md:flex-nowrap md:h-16 items-center px-3 md:px-6 gap-x-2 py-2.5 md:py-0">
           {/* Hamburger - mobile only */}
           <button
             className="order-1 md:hidden flex-shrink-0 p-2 -ml-1 text-stone-500 hover:bg-stone-100 rounded-md"
@@ -801,25 +847,6 @@ export default function App() {
           >
             <Menu size={20} />
           </button>
-
-          {/* Title */}
-          <div className="order-2 flex-1 min-w-0">
-            {activeTab === "editor" && currentProject ? (
-              <input
-                type="text"
-                value={currentProject.title}
-                onChange={(e) => {
-                  const newTitle = e.target.value;
-                  setCurrentProject({ ...currentProject, title: newTitle });
-                  setProjects((prev) => prev.map(p => p.id === currentProject.id ? { ...p, title: newTitle } : p));
-                }}
-                className="w-full text-base md:text-lg font-medium bg-transparent border-none focus:outline-none focus:ring-0"
-                placeholder="Script Title"
-              />
-            ) : (
-              <h2 className="text-lg font-medium">Empty</h2>
-            )}
-          </div>
 
           {/* Mic button — top row on mobile and desktop */}
           {activeTab === "editor" && (
@@ -833,19 +860,18 @@ export default function App() {
               title={isListening ? "Stop Listening (Ctrl+.)" : "Start Listening (Ctrl+.)"}
             >
               {isListening ? <MicOff size={16} /> : <Mic size={16} />}
-              <span className="md:hidden">{isListening ? "Stop" : "Listen"}</span>
               <span className="hidden md:inline">{isListening ? "Stop Listening" : "Start Listening"}</span>
             </button>
           )}
 
-          {/* Action buttons — wraps to row 2 on mobile, stays inline on desktop */}
+          {/* Action buttons — row 1 on mobile (right-aligned), inline on desktop */}
           {activeTab === "editor" && (
-            <div className="order-4 md:order-3 w-full md:w-auto md:flex-shrink-0 flex items-center gap-1 md:gap-2 overflow-x-auto pb-1 md:pb-0">
+            <div className="order-2 md:order-3 ml-auto md:ml-0 md:flex-shrink-0 flex items-center gap-1 md:gap-2 overflow-x-auto">
               <div className="flex items-center gap-0.5 border-r border-stone-200 pr-2 mr-0.5 flex-shrink-0">
                 <button
                   onClick={undo}
                   disabled={history.length === 0}
-                  className="p-2 text-stone-500 hover:bg-stone-100 rounded-md disabled:opacity-30 transition-colors"
+                  className="p-1 text-stone-500 hover:bg-stone-100 rounded-md disabled:opacity-30 transition-colors"
                   title="Undo (Ctrl+Z)"
                 >
                   <Undo size={16} />
@@ -873,22 +899,55 @@ export default function App() {
                     }
                   });
                 }}
-                className="flex items-center gap-1.5 px-2.5 py-2 text-sm font-medium text-red-600 hover:bg-red-50 rounded-md transition-colors flex-shrink-0"
+                className="p-2 text-red-500 hover:bg-red-50 rounded-md transition-colors flex-shrink-0"
+                title="Clear script"
               >
-                Clear
+                <Trash2 size={16} />
               </button>
               <div className="flex bg-stone-100 rounded-md overflow-hidden flex-shrink-0">
+                {/* Mobile: single download button with dropdown */}
+                <div className="relative md:hidden group">
+                  <button
+                    className="flex items-center gap-1.5 px-2.5 py-2 text-sm font-medium text-stone-600 hover:bg-stone-200 transition-colors"
+                    title="Export"
+                  >
+                    <Download size={16} />
+                  </button>
+                  <div className="absolute right-0 top-full mt-1 bg-white border border-stone-200 rounded-md shadow-lg hidden group-focus-within:flex flex-col z-50 min-w-[90px]">
+                    <button
+                      onClick={() => {
+                        requestConfirm("Are you sure you want to export as PDF?", () => {
+                          if (currentProject) exportToPdf({ title: currentProject.title, blocks, showTitlePage, titlePage });
+                        });
+                      }}
+                      className="flex items-center gap-2 px-3 py-2 text-sm text-stone-700 hover:bg-stone-100"
+                    >
+                      <Download size={14} /> PDF
+                    </button>
+                    <button
+                      onClick={() => {
+                        requestConfirm("Are you sure you want to export as Text?", () => {
+                          if (currentProject) exportToTxt({ title: currentProject.title, blocks, showTitlePage, titlePage });
+                        });
+                      }}
+                      className="flex items-center gap-2 px-3 py-2 text-sm text-stone-700 hover:bg-stone-100"
+                    >
+                      <Download size={14} /> TXT
+                    </button>
+                  </div>
+                </div>
+                {/* Desktop: separate PDF and TXT buttons */}
                 <button
                   onClick={() => {
                     requestConfirm("Are you sure you want to export as PDF?", () => {
                       if (currentProject) exportToPdf({ title: currentProject.title, blocks, showTitlePage, titlePage });
                     });
                   }}
-                  className="flex items-center gap-1.5 px-2.5 py-2 text-sm font-medium text-stone-600 hover:bg-stone-200 transition-colors border-r border-stone-200"
+                  className="hidden md:flex items-center gap-1.5 px-2.5 py-2 text-sm font-medium text-stone-600 hover:bg-stone-200 transition-colors border-r border-stone-200"
                   title="Export as PDF"
                 >
                   <Download size={16} />
-                  <span className="hidden md:inline">PDF</span>
+                  PDF
                 </button>
                 <button
                   onClick={() => {
@@ -896,7 +955,7 @@ export default function App() {
                       if (currentProject) exportToTxt({ title: currentProject.title, blocks, showTitlePage, titlePage });
                     });
                   }}
-                  className="flex items-center gap-1.5 px-2.5 py-2 text-sm font-medium text-stone-600 hover:bg-stone-200 transition-colors"
+                  className="hidden md:flex items-center gap-1.5 px-2.5 py-2 text-sm font-medium text-stone-600 hover:bg-stone-200 transition-colors"
                   title="Export as Text"
                 >
                   TXT
@@ -944,6 +1003,25 @@ export default function App() {
               </button>
             </div>
           )}
+
+          {/* Title — row 2 on mobile (w-full), row 1 on desktop */}
+          <div className="order-4 md:order-2 w-full md:w-auto md:flex-1 min-w-0 pt-1.5 md:pt-0">
+            {activeTab === "editor" && currentProject ? (
+              <input
+                type="text"
+                value={currentProject.title}
+                onChange={(e) => {
+                  const newTitle = e.target.value;
+                  setCurrentProject({ ...currentProject, title: newTitle });
+                  setProjects((prev) => prev.map(p => p.id === currentProject.id ? { ...p, title: newTitle } : p));
+                }}
+                className="w-full text-base md:text-lg font-medium bg-transparent border-none focus:outline-none focus:ring-0"
+                placeholder="Script Title"
+              />
+            ) : (
+              <h2 className="text-lg font-medium">Empty</h2>
+            )}
+          </div>
         </header>
 
         {/* Workspace */}

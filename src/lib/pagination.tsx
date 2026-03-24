@@ -43,8 +43,8 @@ export function paginateBlocks(blocks: ParsedBlock[]): { blocks: { block: Parsed
 }
 
 export const Page: React.FC<{ pageNumber: number; children?: React.ReactNode }> = ({ children, pageNumber }) => (
-  <div className="relative w-full max-w-[8.5in] md:h-[11in] bg-white shadow-lg mb-4 md:mb-8 px-6 py-8 md:pl-[1.5in] md:pr-[1in] md:pt-[1in] md:pb-[1in] font-mono text-[12pt] leading-[1.2] text-black overflow-visible md:overflow-hidden flex flex-col">
-    <div className="absolute top-4 right-4 md:top-[0.5in] md:right-[1in] text-right">
+  <div className="relative w-full max-w-[8.5in] min-h-[11in] bg-white shadow-lg mb-4 md:mb-8 px-12 py-12 md:pl-[1.5in] md:pr-[1in] md:pt-[1in] md:pb-[1in] font-mono text-[12pt] leading-[1.2] text-black overflow-visible flex flex-col">
+    <div className="absolute top-6 right-4 md:top-[0.5in] md:right-[1in] text-right">
       {pageNumber}.
     </div>
     <div className="flex-1">

@@ -55,6 +55,24 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
+  // Azure Speech token proxy
+  app.get("/api/speech-token", async (req, res) => {
+    const key = process.env.AZURE_SPEECH_KEY;
+    const region = process.env.AZURE_SPEECH_REGION;
+    if (!key || !region) {
+      return res.status(500).json({ error: "Azure credentials not configured" });
+    }
+    const tokenResponse = await fetch(
+      `https://${region}.api.cognitive.microsoft.com/sts/v1.0/issueToken`,
+      { method: "POST", headers: { "Ocp-Apim-Subscription-Key": key } }
+    );
+    if (!tokenResponse.ok) {
+      return res.status(502).json({ error: "Failed to fetch Azure token" });
+    }
+    const token = await tokenResponse.text();
+    res.json({ token, region });
+  });
+
   // Basic Auth Mock (for resume purposes, we'll implement a simple mock auth)
   let currentUser = 1; // Mock user ID
   

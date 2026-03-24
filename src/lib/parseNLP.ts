@@ -54,6 +54,10 @@ export function parseNLP(text: string, characters: Character[], lastSpeaker: str
   } else if (/^act\s+(one|two|three|four|five|\d+)$/i.test(processedText.trim())) {
     type = "act_header";
     parsedText = processedText.trim().toUpperCase();
+  } else if (/^act header[:]?\s*(.*)$/i.test(processedText.trim())) {
+    type = "act_header";
+    const label = processedText.trim().replace(/^act header[:]?\s*/i, "").trim();
+    parsedText = label ? label.toUpperCase() : "ACT";
   } else {
     let preExtractedParenthetical = "";
     let cleanedText = processedText;
