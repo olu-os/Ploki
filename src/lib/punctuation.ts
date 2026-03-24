@@ -21,8 +21,7 @@ const punctuationMap: Record<string, string> = {
   "close brace": "}",
   "apostrophe": "'",
   "quote": '"',
-  "double quote": '"',
-  "slash": "/",
+  "double quote": '"'
 };
 
 export function replaceSpokenPunctuation(text: string, capitalize = true): string {

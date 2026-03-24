@@ -3,7 +3,7 @@ import { Character, ParsedBlock } from "../types";
 export function parseNLP(text: string, characters: Character[], lastSpeaker: string | null): ParsedBlock & { isContinued?: boolean } {
   let processedText = text;
 
-  // Replace character aliases and names with canonical names throughout the text
+  // Replace character aliases and names with canonical names everywhere
   if (characters && characters.length > 0) {
     // Sort all patterns by length descending to handle overlapping names correctly
     const allMappings: { pattern: string, replacement: string }[] = [];
@@ -38,7 +38,7 @@ export function parseNLP(text: string, characters: Character[], lastSpeaker: str
   let type: ParsedBlock["type"] = "action";
   let isContinued = false;
   const lowerText = processedText.toLowerCase();
-  // Accept both 'scene heading' and 'seen heading' (common mishearing)
+  // Accept both 'scene heading' and 'seen heading' in case of a mishearing
   const sceneHeadingMatch = processedText.match(/^(scene|seen) heading:?:?\s*(.+)/i);
   if (sceneHeadingMatch) {
     type = "scene_heading";
@@ -69,7 +69,6 @@ export function parseNLP(text: string, characters: Character[], lastSpeaker: str
       cleanedText = (before + (before && after ? " " : "") + after).trim();
     }
 
-    // Dialogue: "Will says ..." or "Will continued ..."
     const dialogueMatch = cleanedText.match(/^(.+?)\s+(says|said|asks|asked|yells|yelled|whispers|whispered|replies|replied|retorts|retorted|responds|responded|queries|queried|goes on|went on|continues|continued|shouts|shouted|screams|screamed|mumbles|mumbled|stutters|stuttered|exclaims|exclaimed|states|stated|mentions|mentioned|adds|added|tells|told|explains|explained|argues|argued|insists|insisted)(?:\s+(.+))?$/i);
     if (dialogueMatch) {
       let speaker = dialogueMatch[1].trim();
