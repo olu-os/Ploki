@@ -34,11 +34,13 @@ export const InsertionBar: React.FC<InsertionBarProps> = ({
   }, []);
 
   return (
-    <div className={`group/bar relative flex flex-col items-center transition-all ${showMenu ? 'z-50' : 'z-10'} ${
-      isListeningAtThisIndex ? "my-8 min-h-[3rem]" : "h-6 justify-center -my-3"
+    <div className={`group/bar relative flex flex-col transition-all duration-200 ${showMenu ? 'z-50' : 'z-10'} ${
+      isListeningAtThisIndex ? "my-8" : "-my-3"
     }`}>
-      <div className={`w-full h-[1px] bg-stone-200 transition-opacity ${showMenu || isListeningAtThisIndex ? 'opacity-100' : 'opacity-0 group-hover/bar:opacity-100'}`} />
-      
+      {/* Bar row — line, plus, and mic always share this h-6 row so they stay aligned */}
+      <div className="relative flex items-center h-6">
+        <div className={`w-full h-[1px] bg-stone-200 transition-opacity ${showMenu || isListeningAtThisIndex ? 'opacity-100' : 'opacity-0 group-hover/bar:opacity-100'}`} />
+
       <div className={`absolute -left-8 flex items-center transition-opacity ${showMenu || isListeningAtThisIndex ? 'opacity-100' : 'opacity-0 group-hover/bar:opacity-100'}`} ref={menuRef}>
         <button 
           onClick={() => setShowMenu(!showMenu)}
@@ -86,8 +88,22 @@ export const InsertionBar: React.FC<InsertionBarProps> = ({
       )}
       </div>
 
+        <div className={`absolute -right-8 transition-opacity ${isListeningAtThisIndex ? 'opacity-100' : 'opacity-0 group-hover/bar:opacity-100'}`}>
+          <button 
+            onClick={() => onStartDictation(index)}
+            className={`p-1 rounded-full shadow-sm border transition-colors ${
+              isListeningAtThisIndex 
+              ? "bg-red-50 border-red-200 text-red-500" 
+              : "bg-white border-stone-200 text-stone-400 hover:text-stone-600 hover:bg-stone-50"
+            }`}
+          >
+            <Mic size={14} />
+          </button>
+        </div>
+      </div>{/* end bar row */}
+
       {isListeningAtThisIndex && (
-        <div className="w-full py-4">
+        <div className="w-full py-2">
           <div className="flex flex-col gap-2">
             <div className="flex items-start gap-3">
               <span className="relative flex h-2 w-2 shrink-0 mt-2">
@@ -119,19 +135,6 @@ export const InsertionBar: React.FC<InsertionBarProps> = ({
           </div>
         </div>
       )}
-
-      <div className={`absolute -right-8 transition-opacity ${isListeningAtThisIndex ? 'opacity-100' : 'opacity-0 group-hover/bar:opacity-100'}`}>
-        <button 
-          onClick={() => onStartDictation(index)}
-          className={`p-1 rounded-full shadow-sm border transition-colors ${
-            isListeningAtThisIndex 
-            ? "bg-red-50 border-red-200 text-red-500" 
-            : "bg-white border-stone-200 text-stone-400 hover:text-stone-600 hover:bg-stone-50"
-          }`}
-        >
-          <Mic size={14} />
-        </button>
-      </div>
     </div>
   );
 };

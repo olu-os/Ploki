@@ -292,11 +292,34 @@ export default function App() {
     if (projects.length > 0) {
       setCurrentProject(prev => {
         if (!prev) {
-          parseContentToBlocks(projects[0].content);
-          const tp = projects[0].title_page ?? null;
+          const proj = projects[0];
+          // Recover any draft that was written to localStorage but not yet synced to Supabase
+          let content = proj.content;
+          let title = proj.title;
+          let tp = proj.title_page ?? null;
+          try {
+            const raw = localStorage.getItem(`ploki_draft_${proj.id}`);
+            if (raw) {
+              const draft = JSON.parse(raw);
+              const supabaseTs = proj.updated_at ? new Date(proj.updated_at).getTime() : 0;
+              if (draft.ts > supabaseTs) {
+                content = draft.content;
+                title = draft.title ?? title;
+                tp = draft.title_page ?? tp;
+                supabase
+                  .from("projects")
+                  .update({ content, title, title_page: tp, updated_at: new Date().toISOString() })
+                  .eq("id", proj.id)
+                  .then(() => { try { localStorage.removeItem(`ploki_draft_${proj.id}`); } catch {} });
+              } else {
+                localStorage.removeItem(`ploki_draft_${proj.id}`);
+              }
+            }
+          } catch {}
+          parseContentToBlocks(content);
           setTitlePage(tp);
           setShowTitlePage(!!tp);
-          return projects[0];
+          return { ...proj, content, title, title_page: tp };
         }
         return prev;
       });
@@ -406,28 +429,29 @@ export default function App() {
     return JSON.stringify(blks);
   };
 
-  // Auto-save
   const autoSaveTimerRef = useRef<any>(null);
   const lastSavedContentRef = useRef<string>("");
   const lastSavedTitleRef = useRef<string>("");
 
-  // Refs so the flush-on-unload handler always sees the latest values
-  const latestBlocksRef = useRef(blocks);
-  const latestProjectRef = useRef(currentProject);
-  const latestTitlePageRef = useRef(titlePage);
-  useEffect(() => { latestBlocksRef.current = blocks; }, [blocks]);
-  useEffect(() => { latestProjectRef.current = currentProject; }, [currentProject]);
-  useEffect(() => { latestTitlePageRef.current = titlePage; }, [titlePage]);
+  const draftKey = (id: string | number) => `ploki_draft_${id}`;
 
+  // Write to local storage on every change
+  useEffect(() => {
+    if (!currentProject || blocks === undefined) return;
+    const content = blocksToContent(blocks);
+    const draft = { content, title: currentProject.title, title_page: titlePage, ts: Date.now() };
+    try { localStorage.setItem(draftKey(currentProject.id), JSON.stringify(draft)); } catch {}
+  }, [blocks, currentProject?.id, currentProject?.title, titlePage]);
+
+  // Supabase save — clears localStorage on success
   useEffect(() => {
     if (!currentProject || blocks === undefined) return;
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = setTimeout(async () => {
       const content = blocksToContent(blocks);
       const title = currentProject.title;
-      const shouldSaveContent = content !== currentProject.content || content !== lastSavedContentRef.current;
-      const shouldSaveTitle = title !== lastSavedTitleRef.current;
-      if (!shouldSaveContent && !shouldSaveTitle) return;
+      const shouldSave = content !== lastSavedContentRef.current || title !== lastSavedTitleRef.current;
+      if (!shouldSave) return;
       await supabase
         .from("projects")
         .update({ content, title, title_page: titlePage, updated_at: new Date().toISOString() })
@@ -436,38 +460,10 @@ export default function App() {
       setProjects(prev => prev.map(p => p.id === currentProject.id ? { ...p, content, title, title_page: titlePage } : p));
       lastSavedContentRef.current = content;
       lastSavedTitleRef.current = title;
+      try { localStorage.removeItem(draftKey(currentProject.id)); } catch {}
     }, 1500);
     return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current); };
   }, [blocks, currentProject?.title, currentProject?.id, titlePage]);
-
-  // Flush any unsaved changes immediately when the page is hidden or unloaded
-  useEffect(() => {
-    const flush = () => {
-      const proj = latestProjectRef.current;
-      const blks = latestBlocksRef.current;
-      const tp = latestTitlePageRef.current;
-      if (!proj || blks === undefined) return;
-      const content = JSON.stringify(blks);
-      if (content === lastSavedContentRef.current && proj.title === lastSavedTitleRef.current) return;
-      if (autoSaveTimerRef.current) {
-        clearTimeout(autoSaveTimerRef.current);
-        autoSaveTimerRef.current = null;
-      }
-      lastSavedContentRef.current = content;
-      lastSavedTitleRef.current = proj.title;
-      supabase
-        .from("projects")
-        .update({ content, title: proj.title, title_page: tp, updated_at: new Date().toISOString() })
-        .eq("id", proj.id);
-    };
-    const handleVisibilityChange = () => { if (document.visibilityState === "hidden") flush(); };
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    window.addEventListener("pagehide", flush);
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-      window.removeEventListener("pagehide", flush);
-    };
-  }, []);
 
   // Speech Recognition Setup (Azure)
   useEffect(() => {
