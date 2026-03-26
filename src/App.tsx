@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Mic, MicOff, Save, FileText, Users, Plus, Download, Undo, Redo, LogOut, History, Menu, X, Trash2 } from "lucide-react";
+import { Mic, MicOff, Save, FileText, Users, Plus, Download, Undo, Redo, LogOut, History, Menu, X, Trash2, Settings } from "lucide-react";
 import { Project, Character, ParsedBlock, ProjectVersion, TitlePageData } from "./types";
 import * as SpeechSDK from "microsoft-cognitiveservices-speech-sdk";
 import { supabase } from "./lib/supabase";
@@ -10,9 +10,18 @@ import { exportToTxt, exportToPdf } from "./lib/exportScript";
 import { InsertionBar } from "./components/InsertionBar";
 import { AuthScreen } from "./components/AuthScreen";
 import { ScriptBlock } from "./components/ScriptBlock";
+import { SettingsTab, AppSettings, DEFAULT_SETTINGS } from "./components/SettingsTab";
+
+const INITIAL_SCRIPT_NAME = "New Script";
+const TRASH_RETENTION_DAYS = 30;
+const AUTOSAVE_DELAY_MS = 1500;
+const MAX_HISTORY_SIZE = 49;
+const MAX_VERSIONS = 30;
 
 export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
+  const [trashedProjects, setTrashedProjects] = useState<Project[]>([]);
+  const [showTrash, setShowTrash] = useState(false);
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState("");
@@ -34,6 +43,10 @@ export default function App() {
   const [titlePage, setTitlePage] = useState<TitlePageData | null>(null);
   const titlePageRef = useRef<TitlePageData | null>(null);
   titlePageRef.current = titlePage;
+  const blocksRef = useRef<ParsedBlock[]>([]);
+  blocksRef.current = blocks;
+  const currentProjectRef = useRef<Project | null>(null);
+  currentProjectRef.current = currentProject;
 
   const [showTitlePage, setShowTitlePage] = useState(false);
   const [loadingVersions, setLoadingVersions] = useState(false);
@@ -47,9 +60,11 @@ export default function App() {
   const azureRecognizerRef = useRef<SpeechSDK.SpeechRecognizer | null>(null);
 
   const updateBlocks = (newBlocks: ParsedBlock[] | ((prev: ParsedBlock[]) => ParsedBlock[])) => {
+    if (versionIdleTimerRef.current) clearTimeout(versionIdleTimerRef.current);
+    versionIdleTimerRef.current = setTimeout(() => saveVersionCheckpointRef.current(), 5 * 60 * 1000);
     setBlocks(prev => {
       const next = typeof newBlocks === 'function' ? newBlocks(prev) : newBlocks;
-      setHistory(h => [...h.slice(-49), { blocks: prev, titlePage: titlePageRef.current }]);
+      setHistory(h => [...h.slice(-MAX_HISTORY_SIZE), { blocks: prev, titlePage: titlePageRef.current }]);
       setFuture([]);
       return next;
     });
@@ -59,7 +74,7 @@ export default function App() {
     setTitlePage(prev => {
       const next = typeof update === 'function' ? update(prev) : (prev ? { ...prev, ...update } : null);
       if (next !== prev) {
-        setHistory(h => [...h.slice(-49), { blocks, titlePage: prev }]);
+        setHistory(h => [...h.slice(-MAX_HISTORY_SIZE), { blocks, titlePage: prev }]);
         setFuture([]);
       }
       return next;
@@ -228,7 +243,22 @@ export default function App() {
     setSelectionBox(null);
   };
 
-  const [activeTab, setActiveTab] = useState<"editor" | "characters">("editor");
+  const [activeTab, setActiveTab] = useState<"editor" | "characters" | "settings">("editor");
+
+  const [settings, setSettings] = useState<AppSettings>(() => {
+    try {
+      const saved = localStorage.getItem("ploki_settings");
+      return saved ? { ...DEFAULT_SETTINGS, ...JSON.parse(saved) } : DEFAULT_SETTINGS;
+    } catch { return DEFAULT_SETTINGS; }
+  });
+  const settingsRef = useRef<AppSettings>(settings);
+  useEffect(() => {
+    settingsRef.current = settings;
+    localStorage.setItem("ploki_settings", JSON.stringify(settings));
+  }, [settings]);
+
+  const updateSettings = (patch: Partial<AppSettings>) =>
+    setSettings(prev => ({ ...prev, ...patch }));
   const [characters, setCharacters] = useState<Character[]>([]);
   const [newCharName, setNewCharName] = useState("");
   const [newCharAliases, setNewCharAliases] = useState("");
@@ -238,12 +268,13 @@ export default function App() {
   const insertionIndexRef = useRef<number | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean;
+    title: string;
     message: string;
     onConfirm: () => void;
-  }>({ isOpen: false, message: "", onConfirm: () => {} });
+  }>({ isOpen: false, title: "", message: "", onConfirm: () => {} });
 
-  const requestConfirm = (message: string, onConfirm: () => void) => {
-    setConfirmDialog({ isOpen: true, message, onConfirm });
+  const requestConfirm = (title: string, message: string, onConfirm: () => void) => {
+    setConfirmDialog({ isOpen: true, title, message, onConfirm });
   };
 
   // Auth state
@@ -285,6 +316,7 @@ export default function App() {
     const { data, error } = await supabase
       .from("projects")
       .select("*")
+      .is("deleted_at", null)
       .order("updated_at", { ascending: false });
     if (error) { console.error(error); return; }
     const projects = data || [];
@@ -317,6 +349,7 @@ export default function App() {
             }
           } catch {}
           parseContentToBlocks(content);
+          lastVersionContentRef.current = content;
           setTitlePage(tp);
           setShowTitlePage(!!tp);
           return { ...proj, content, title, title_page: tp };
@@ -324,6 +357,18 @@ export default function App() {
         return prev;
       });
     }
+  };
+
+  const fetchTrashedProjects = async () => {
+    const thirtyDaysAgo = new Date(Date.now() - TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    const { data, error } = await supabase
+      .from("projects")
+      .select("*")
+      .not("deleted_at", "is", null)
+      .gte("deleted_at", thirtyDaysAgo)
+      .order("deleted_at", { ascending: false });
+    if (error) { console.error(error); return; }
+    setTrashedProjects((data as Project[]) || []);
   };
 
   const fetchCharacters = async () => {
@@ -339,7 +384,7 @@ export default function App() {
   const createProject = async () => {
     const { data, error } = await supabase
       .from("projects")
-      .insert({ title: "New Script", content: "[]" })
+      .insert({ title: INITIAL_SCRIPT_NAME, content: "[]" })
       .select()
       .single();
     if (error) { console.error(error); return; }
@@ -373,14 +418,14 @@ export default function App() {
       .select("*")
       .eq("project_id", projectId)
       .order("created_at", { ascending: false })
-      .limit(30);
+      .limit(MAX_VERSIONS);
     if (error) { console.error(error); setLoadingVersions(false); return; }
     setVersions(data || []);
     setLoadingVersions(false);
   };
 
   const restoreVersion = (version: ProjectVersion) => {
-    requestConfirm("Restore this version? Current unsaved changes will be replaced.", () => {
+    requestConfirm("Restore Version", "This will replace your current unsaved changes.", () => {
       parseContentToBlocks(version.content);
       setShowVersionHistory(false);
     });
@@ -401,9 +446,17 @@ export default function App() {
     await supabase.auth.signOut();
     setUser(null);
     setProjects([]);
+    setTrashedProjects([]);
+    setShowTrash(false);
     setCurrentProject(null);
     setBlocks([]);
     setCharacters([]);
+    setTitlePage(null);
+    setShowTitlePage(false);
+    setVersions([]);
+    setShowVersionHistory(false);
+    setHistory([]);
+    setFuture([]);
   };
 
   const parseContentToBlocks = (content: string) => {
@@ -428,6 +481,33 @@ export default function App() {
   const blocksToContent = (blks: ParsedBlock[]) => {
     return JSON.stringify(blks);
   };
+
+  const lastVersionContentRef = useRef<string>("");
+  const versionIdleTimerRef = useRef<any>(null);
+  const saveVersionCheckpointRef = useRef<() => Promise<void>>(async () => {});
+
+  const saveVersionCheckpoint = async () => {
+    const proj = currentProjectRef.current;
+    const blks = blocksRef.current;
+    if (!proj || !blks) return;
+    const content = blocksToContent(blks);
+    if (content === lastVersionContentRef.current) return;
+    await supabase.from("project_versions").insert({ project_id: proj.id, content });
+    lastVersionContentRef.current = content;
+  };
+  saveVersionCheckpointRef.current = saveVersionCheckpoint;
+
+  // Save version checkpoint when user hides/leaves tab
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.hidden) saveVersionCheckpointRef.current();
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      saveVersionCheckpointRef.current();
+    };
+  }, []);
 
   const autoSaveTimerRef = useRef<any>(null);
   const lastSavedContentRef = useRef<string>("");
@@ -461,7 +541,7 @@ export default function App() {
       lastSavedContentRef.current = content;
       lastSavedTitleRef.current = title;
       try { localStorage.removeItem(draftKey(currentProject.id)); } catch {}
-    }, 1500);
+    }, AUTOSAVE_DELAY_MS);
     return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current); };
   }, [blocks, currentProject?.title, currentProject?.id, titlePage]);
 
@@ -500,8 +580,12 @@ export default function App() {
         const speechConfig = SpeechSDK.SpeechConfig.fromAuthorizationToken(token, region);
         speechConfig.speechRecognitionLanguage = "en-US";
         speechConfig.outputFormat = SpeechSDK.OutputFormat.Detailed;
-        speechConfig.setServiceProperty('punctuation', 'explicit', SpeechSDK.ServicePropertyChannel.UriQueryParameter);
+        const mode = settingsRef.current.punctuationMode;
+        if (mode === "auto") {
+          speechConfig.setServiceProperty('punctuation', 'true', SpeechSDK.ServicePropertyChannel.UriQueryParameter);
+        }
         speechConfig.setServiceProperty('itn', 'true', SpeechSDK.ServicePropertyChannel.UriQueryParameter);
+        speechConfig.setProperty(SpeechSDK.PropertyId.Speech_SegmentationSilenceTimeoutMs, String(settingsRef.current.segmentationSilenceMs));
         
         const audioConfig = SpeechSDK.AudioConfig.fromDefaultMicrophoneInput();
         const recognizer = new SpeechSDK.SpeechRecognizer(speechConfig, audioConfig);
@@ -524,7 +608,9 @@ export default function App() {
               const json = e.result.properties.getProperty(SpeechSDK.PropertyId.SpeechServiceResponse_JsonResult);
               if (json) {
                 const parsed = JSON.parse(json);
-                text = parsed?.NBest?.[0]?.Lexical ?? text;
+                text = settingsRef.current.punctuationMode === "auto"
+                  ? (parsed?.NBest?.[0]?.Display ?? parsed?.NBest?.[0]?.Lexical ?? text)
+                  : (parsed?.NBest?.[0]?.Lexical ?? text);
               }
             } catch {}
             onTranscript(text, true);
@@ -539,12 +625,22 @@ export default function App() {
 
     const handleTranscript = (text: string, isFinal: boolean) => {
       if (!isFinal) {
-        setTranscript(replaceSpokenPunctuation(text, false));
+        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+        silenceTimerRef.current = setTimeout(() => {
+          if (isListeningRef.current) toggleListeningRef.current();
+        }, settingsRef.current.autoStopSilenceMs);
+        const interimText = settingsRef.current.punctuationMode === "spoken"
+          ? replaceSpokenPunctuation(text, false)
+          : text;
+        setTranscript(interimText);
         return;
       }
 
       //prevents Azure from replacing next line, which we use as a marker for new lines in the spoken input, with \n
-      const newFinalText = replaceSpokenPunctuation(text.replace(/\n+/g, " next line ").trim(), false);
+      const rawText = text.replace(/\n+/g, " next line ").trim();
+      const newFinalText = settingsRef.current.punctuationMode === "spoken"
+        ? replaceSpokenPunctuation(rawText, false)
+        : rawText;
       if (newFinalText) {
         const lowerText = newFinalText.toLowerCase();
 
@@ -561,7 +657,7 @@ export default function App() {
           const startsWithPunct = /^[.,!?:;]/.test(newFinalText);
           const combined = (accumulatedTextRef.current + (accumulatedTextRef.current && !startsWithPunct ? " " : "") + newFinalText).trim();
           // Split on every "next line" variant to get individual blocks
-          const segments = combined.split(/next line|x line|next slide|x slide|next lie|x lie/gi).map(s => s.trim()).filter(Boolean);
+          const segments = combined.split(/(?:next line|x line|next slide|x slide|next lie|x lie)\s*[.,!?:;]*/gi).map(s => s.trim()).filter(Boolean);
           accumulatedTextRef.current = "";
           setAccumulatedTranscript("");
           setTranscript("");
@@ -593,11 +689,11 @@ export default function App() {
 
       setTranscript("");
 
-      // Reset 20-second silence auto-stop timer
+      // Reset silence auto-stop timer
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       silenceTimerRef.current = setTimeout(() => {
         if (isListeningRef.current) toggleListeningRef.current();
-      }, 20000);
+      }, settingsRef.current.autoStopSilenceMs);
     };
 
     recognitionRef.current = {
@@ -634,11 +730,11 @@ export default function App() {
       recognitionRef.current?.stop();
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
     } else {
-      // Start 20-second silence timer when listening begins
+      // Start silence timer when listening begins
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       silenceTimerRef.current = setTimeout(() => {
         if (isListeningRef.current) toggleListeningRef.current();
-      }, 20000);
+      }, settingsRef.current.autoStopSilenceMs);
       const idx = index !== undefined ? index : blocks.length;
       setInsertionIndex(idx);
       insertionIndexRef.current = idx;
@@ -757,8 +853,13 @@ export default function App() {
                         setProjects(prev => prev.map(prj => prj.id === currentProject.id ? { ...prj, content, title, title_page: titlePage } : prj));
                         lastSavedContentRef.current = content;
                         lastSavedTitleRef.current = title;
+                        if (content !== lastVersionContentRef.current) {
+                          await supabase.from("project_versions").insert({ project_id: currentProject.id, content });
+                          lastVersionContentRef.current = content;
+                        }
                       }
                     }
+                    lastVersionContentRef.current = p.content ?? "";
                     setCurrentProject(p);
                     parseContentToBlocks(p.content);
                     const newTp = p.title_page ?? null;
@@ -768,6 +869,7 @@ export default function App() {
                     setFuture([]);
                     setActiveTab("editor");
                     setSidebarOpen(false);
+                    if (showVersionHistory) fetchVersions(p.id);
                   }}
                   className={`w-full text-left px-3 py-2 pr-10 rounded text-sm flex items-center gap-2 ${
                     currentProject?.id === p.id ? "bg-stone-200 font-medium" : "hover:bg-stone-200/50"
@@ -779,37 +881,141 @@ export default function App() {
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    requestConfirm("Delete this script?", async () => {
-                      await supabase.from("projects").delete().eq("id", p.id);
-                      fetchProjects();
-                      if (currentProject?.id === p.id) {
-                        setCurrentProject(null);
-                        setBlocks([]);
-                      }
-                    });
+                    const isEmpty =
+                      (!p.content || p.content === "[]" || p.content === "") &&
+                      (!p.title || p.title === INITIAL_SCRIPT_NAME) &&
+                      !p.title_page;
+                    if (isEmpty) {
+                      requestConfirm("Delete Script", "This script is empty and will be permanently deleted.", async () => {
+                        await supabase.from("projects").delete().eq("id", p.id);
+                        fetchProjects();
+                        if (currentProject?.id === p.id) {
+                          setCurrentProject(null);
+                          setBlocks([]);
+                        }
+                      });
+                    } else {
+                      requestConfirm("Move to Trash", "This script will be moved to trash and can be restored within 30 days.", async () => {
+                        await supabase.from("projects").update({ deleted_at: new Date().toISOString() }).eq("id", p.id);
+                        fetchProjects();
+                        if (showTrash) fetchTrashedProjects();
+                        if (currentProject?.id === p.id) {
+                          setCurrentProject(null);
+                          setBlocks([]);
+                        }
+                      });
+                    }
                   }}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 text-stone-400 hover:text-red-500"
+                  className={`absolute right-2 top-1/2 -translate-y-1/2 text-stone-400 hover:text-red-500 transition-opacity ${
+                    currentProject?.id === p.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                  }`}
                 >
                   ×
                 </button>
               </li>
             ))}
           </ul>
+
+          {/* Trash section */}
+          <div className="mt-4 border-t border-stone-200 pt-3">
+            <button
+              onClick={() => {
+                const next = !showTrash;
+                setShowTrash(next);
+                if (next) fetchTrashedProjects();
+              }}
+              className="flex items-center gap-1.5 text-xs font-medium text-stone-400 hover:text-stone-600 w-full px-1 py-1"
+            >
+              <Trash2 size={13} />
+              <span className="uppercase tracking-wider">Trash</span>
+              <span className="ml-auto">{showTrash ? "▲" : "▼"}</span>
+            </button>
+            {showTrash && (
+              <div className="mt-2 rounded border border-stone-200 overflow-hidden text-xs">
+                {trashedProjects.length === 0 ? (
+                  <p className="px-3 py-3 text-stone-400 italic">Trash is empty</p>
+                ) : (
+                  <table className="w-full">
+                    <thead>
+                      <tr className="bg-stone-100 text-stone-400  tracking-wider">
+                        <th className="px-3 py-1.5 text-left font-medium">Name</th>
+                        <th className="px-1 py-1.5 text-right font-medium">Time Left</th>
+                        <th className="px-2 py-1.5"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100">
+                      {trashedProjects.map((p) => {
+                        const daysLeft = Math.ceil((TRASH_RETENTION_DAYS - (Date.now() - new Date(p.deleted_at!).getTime()) / 86400000));
+                        return (
+                          <tr key={p.id} className={`group hover:bg-stone-200 transition-colors duration-150 cursor-pointer ${currentProject?.id === p.id ? "bg-stone-200" : ""}`}
+                            onClick={() => {
+                              setCurrentProject(p);
+                              parseContentToBlocks(p.content);
+                              setTitlePage(p.title_page ?? null);
+                              setShowTitlePage(!!p.title_page);
+                              setSidebarOpen(false);
+                            }}
+                          >
+                            <td className="px-3 py-2 text-stone-600 max-w-[100px] truncate">{p.title}</td>
+                            <td className="px-1 py-2  text-stone-400 whitespace-nowrap">{daysLeft}d</td>
+                            <td className="px-2 py-2 text-right whitespace-nowrap">
+                              <button
+                                title="Restore"
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  await supabase.from("projects").update({ deleted_at: null }).eq("id", p.id);
+                                  fetchProjects();
+                                  fetchTrashedProjects();
+                                  if (currentProject?.id === p.id) setCurrentProject(null);
+                                }}
+                                className="opacity-0 group-hover:opacity-100 text-emerald-500 hover:bg-emerald-100 rounded px-1 transition-colors"
+                              >↩</button>
+                              <button
+                                title="Delete permanently"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  requestConfirm("Delete Permanently", "This script will be gone forever. This cannot be undone.", async () => {
+                                    await supabase.from("projects").delete().eq("id", p.id);
+                                    fetchTrashedProjects();
+                                    if (currentProject?.id === p.id) { setCurrentProject(null); setBlocks([]); }
+                                  });
+                                }}
+                                className="opacity-0 group-hover:opacity-100 text-red-400 hover:bg-red-100 rounded px-1 transition-colors"
+                              >×</button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="p-4 border-t border-stone-200">
           <div className="mb-4">
             <div className="flex justify-between items-center mb-1">
               <span className="text-xs font-medium text-stone-500 uppercase">Daily Goal</span>
-              <span className="text-xs font-medium text-emerald-600">{wordCount} / 500</span>
+              <span className="text-xs font-medium text-emerald-600">{wordCount} / {settings.dailyWordGoal}</span>
             </div>
             <div className="w-full bg-stone-200 rounded-full h-1.5">
               <div 
                 className="bg-emerald-500 h-1.5 rounded-full transition-all duration-500" 
-                style={{ width: `${Math.min((wordCount / 500) * 100, 100)}%` }}
+                style={{ width: `${Math.min((wordCount / settings.dailyWordGoal) * 100, 100)}%` }}
               ></div>
             </div>
           </div>
+          <button
+            onClick={() => { setActiveTab("settings"); setSidebarOpen(false); }}
+            className={`w-full flex items-center gap-2 px-3 py-2 rounded text-sm ${
+              activeTab === "settings" ? "bg-stone-200 font-medium" : "hover:bg-stone-200/50"
+            }`}
+          >
+            <Settings size={16} className="text-stone-500" />
+            Settings
+          </button>
           <button
             onClick={() => { setActiveTab("characters"); setSidebarOpen(false); }}
             className={`w-full flex items-center gap-2 px-3 py-2 rounded text-sm ${
@@ -845,7 +1051,7 @@ export default function App() {
           </button>
 
           {/* Mic button — top row on mobile and desktop */}
-          {activeTab === "editor" && (
+          {activeTab === "editor" && currentProject && !currentProject.deleted_at && (
             <button
               onClick={() => toggleListening()}
               className={`order-3 md:order-4 flex-shrink-0 flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-full transition-colors ${
@@ -861,7 +1067,7 @@ export default function App() {
           )}
 
           {/* Action buttons — row 1 on mobile (right-aligned), inline on desktop */}
-          {activeTab === "editor" && (
+          {activeTab === "editor" && currentProject && !currentProject.deleted_at && (
             <div className="order-2 md:order-3 ml-auto md:ml-0 md:flex-shrink-0 flex items-center gap-1 md:gap-2 overflow-x-auto">
               <div className="flex items-center gap-0.5 border-r border-stone-200 pr-2 mr-0.5 flex-shrink-0">
                 <button
@@ -883,7 +1089,7 @@ export default function App() {
               </div>
               <button
                 onClick={() => {
-                  requestConfirm("Are you sure you want to clear the script?", async () => {
+                  requestConfirm("Clear Script", "All blocks will be cleared.", async () => {
                     updateBlocks([]);
                     if (currentProject) {
                       await supabase
@@ -912,7 +1118,7 @@ export default function App() {
                   <div className="absolute right-0 top-full mt-1 bg-white border border-stone-200 rounded-md shadow-lg hidden group-focus-within:flex flex-col z-50 min-w-[90px]">
                     <button
                       onClick={() => {
-                        requestConfirm("Are you sure you want to export as PDF?", () => {
+                        requestConfirm("Export as PDF", "A PDF copy of your script will be downloaded.", () => {
                           if (currentProject) exportToPdf({ title: currentProject.title, blocks, showTitlePage, titlePage });
                         });
                       }}
@@ -922,7 +1128,7 @@ export default function App() {
                     </button>
                     <button
                       onClick={() => {
-                        requestConfirm("Are you sure you want to export as Text?", () => {
+                        requestConfirm("Export as Text", "A plain text copy of your script will be downloaded.", () => {
                           if (currentProject) exportToTxt({ title: currentProject.title, blocks, showTitlePage, titlePage });
                         });
                       }}
@@ -935,7 +1141,7 @@ export default function App() {
                 {/* Desktop: separate PDF and TXT buttons */}
                 <button
                   onClick={() => {
-                    requestConfirm("Are you sure you want to export as PDF?", () => {
+                    requestConfirm("Export as PDF", "A PDF copy of your script will be downloaded.", () => {
                       if (currentProject) exportToPdf({ title: currentProject.title, blocks, showTitlePage, titlePage });
                     });
                   }}
@@ -947,7 +1153,7 @@ export default function App() {
                 </button>
                 <button
                   onClick={() => {
-                    requestConfirm("Are you sure you want to export as Text?", () => {
+                    requestConfirm("Export as Text", "A plain text copy of your script will be downloaded.", () => {
                       if (currentProject) exportToTxt({ title: currentProject.title, blocks, showTitlePage, titlePage });
                     });
                   }}
@@ -959,7 +1165,7 @@ export default function App() {
               </div>
               <button
                 onClick={() => {
-                  requestConfirm("Are you sure you want to save the script?", saveProject);
+                  requestConfirm("Save Script", "Your current script will be saved.", saveProject);
                 }}
                 disabled={isSaving}
                 className={`flex items-center gap-1.5 px-2.5 py-2 text-sm font-medium rounded-md transition-colors flex-shrink-0 ${
@@ -1048,7 +1254,52 @@ export default function App() {
             </div>
           )}
 
-          {activeTab === "editor" ? (
+          {activeTab === "editor" && currentProject?.deleted_at && (
+            <div className="bg-white border-white-200 mb-8 px-4 py-2.5 flex items-center justify-between gap-4 flex-shrink-0">
+              <div className="flex items-center gap-2 text-black-700 text-base">
+                <Trash2 size={17} />
+                <span>This script is in the trash.</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={async () => {
+                    await supabase.from("projects").update({ deleted_at: null }).eq("id", currentProject.id);
+                    fetchProjects();
+                    fetchTrashedProjects();
+                    setCurrentProject(prev => prev ? { ...prev, deleted_at: null } : prev);
+                  }}
+                  className="px-3 py-1.5 text-sm font-medium bg-white border-1 border-white text-black rounded-md hover:bg-stone-100 transition-colors"
+                >
+                  Restore
+                </button>
+                <button
+                  onClick={() => requestConfirm("Delete Permanently", "This script will be gone forever. This cannot be undone.", async () => {
+                    await supabase.from("projects").delete().eq("id", currentProject.id);
+                    fetchTrashedProjects();
+                    setCurrentProject(null);
+                    setBlocks([]);
+                  })}
+                  className="px-3 py-1.5 text-sm font-medium bg-black text-white rounded-md hover:bg-stone-800 transition-colors"
+                >
+                  Delete Permanently
+                </button>
+              </div>
+            </div>
+          )}
+
+          {activeTab === "editor" && !currentProject ? (
+            <div className="flex flex-col items-center justify-center h-full gap-4 text-stone-400">
+              <FileText size={48} className="text-stone-300" />
+              <p className="text-lg font-medium text-stone-500">No script selected</p>
+              <button
+                onClick={createProject}
+                className="flex items-center gap-2 px-4 py-2 bg-stone-900 text-white rounded-lg text-sm font-medium hover:bg-stone-800 transition-colors"
+              >
+                <Plus size={16} />
+                Create a Script
+              </button>
+            </div>
+          ) : activeTab === "editor" ? (
             <div id="script-content" className="w-full flex flex-col items-center relative">
               {selectionBox && Math.hypot(selectionBox.startX - selectionBox.endX, selectionBox.startY - selectionBox.endY) > 5 && (
                 <div 
@@ -1200,28 +1451,33 @@ export default function App() {
                 </>
               )}
             </div>
+          ) : activeTab === "settings" ? (
+            <SettingsTab settings={settings} onChange={updateSettings} />
           ) : (
             <div className="w-full max-w-3xl">
-              <div className="bg-white p-6 rounded-sm shadow-sm border border-stone-200 mb-6">
+              <div className="bg-white p-6 rounded-sm shadow-sm border border-stone-200 mb-6 overflow-hidden">
                 <h3 className="text-lg font-medium mb-4">Add Character</h3>
-                <div className="flex gap-4">
+                <div className="flex flex-col sm:flex-row gap-3">
                   <input
                     type="text"
                     placeholder="Canonical Name (e.g. EMILIO)"
                     value={newCharName}
                     onChange={(e) => setNewCharName(e.target.value)}
-                    className="flex-1 px-4 py-2 border border-stone-300 rounded-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    className="flex-1 min-w-0 px-4 py-2 border border-stone-300 rounded-sm focus:outline-none focus:ring-1 focus:ring-black-500"
                   />
                   <input
                     type="text"
                     placeholder="Aliases (comma separated, e.g. Em, E)"
                     value={newCharAliases}
                     onChange={(e) => setNewCharAliases(e.target.value)}
-                    className="flex-1 px-4 py-2 border border-stone-300 rounded-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    className="flex-1 min-w-0 px-4 py-2 border border-stone-300 rounded-sm focus:outline-none focus:ring-1 focus:ring-black-500"
                   />
+                  
+                </div>
+                <div className="flex justify-end mt-3">
                   <button
                     onClick={addCharacter}
-                    className="px-6 py-2 bg-stone-900 text-white rounded-sm hover:bg-stone-800 font-medium"
+                    className="px-4 py-2 bg-stone-900 text-white rounded-sm hover:bg-stone-800 font-medium sm:px-6"
                   >
                     Add
                   </button>
@@ -1261,7 +1517,7 @@ export default function App() {
                         <td className="px-6 py-4 text-right">
                           <button
                             onClick={() => {
-                              requestConfirm("Delete this character?", async () => {
+                              requestConfirm("Delete Character", "This character will be removed from your list.", async () => {
                                 await supabase.from("characters").delete().eq("id", c.id);
                                 fetchCharacters();
                               });
@@ -1324,7 +1580,7 @@ export default function App() {
       {confirmDialog.isOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-lg p-6 max-w-sm w-full mx-4">
-            <h3 className="text-lg font-medium text-stone-900 mb-2">Confirm Action</h3>
+            <h3 className="text-lg font-medium text-stone-900 mb-2">{confirmDialog.title}</h3>
             <p className="text-stone-600 mb-6">{confirmDialog.message}</p>
             <div className="flex justify-end gap-3">
               <button

@@ -4,7 +4,8 @@ create table projects (
   title text not null default 'New Script',
   content text not null default '[]',
   title_page jsonb,
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz
 );
 alter table projects enable row level security;
 create policy "Users manage own projects" on projects for all using (auth.uid() = user_id);

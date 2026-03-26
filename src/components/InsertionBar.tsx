@@ -41,10 +41,10 @@ export const InsertionBar: React.FC<InsertionBarProps> = ({
       <div className="relative flex items-center h-6">
         <div className={`w-full h-[1px] bg-stone-200 transition-opacity ${showMenu || isListeningAtThisIndex ? 'opacity-100' : 'opacity-0 group-hover/bar:opacity-100'}`} />
 
-      <div className={`absolute -left-8 flex items-center transition-opacity ${showMenu || isListeningAtThisIndex ? 'opacity-100' : 'opacity-0 group-hover/bar:opacity-100'}`} ref={menuRef}>
+      <div className={`absolute -left-6 flex items-center transition-opacity ${showMenu || isListeningAtThisIndex ? 'opacity-100' : 'opacity-0 group-hover/bar:opacity-100'}`} ref={menuRef}>
         <button 
           onClick={() => setShowMenu(!showMenu)}
-          className="p-1 bg-white border border-stone-200 rounded-full shadow-sm hover:bg-stone-50 text-stone-400 hover:text-stone-600"
+          className="bg-white border border-stone-200 rounded-full shadow-sm hover:bg-stone-50 text-stone-400 hover:text-stone-600"
         >
           <Plus size={14} />
         </button>
@@ -88,10 +88,10 @@ export const InsertionBar: React.FC<InsertionBarProps> = ({
       )}
       </div>
 
-        <div className={`absolute -right-8 transition-opacity ${isListeningAtThisIndex ? 'opacity-100' : 'opacity-0 group-hover/bar:opacity-100'}`}>
+        <div className={`absolute -right-6 transition-opacity ${isListeningAtThisIndex ? 'opacity-100' : 'opacity-0 group-hover/bar:opacity-100'}`}>
           <button 
             onClick={() => onStartDictation(index)}
-            className={`p-1 rounded-full shadow-sm border transition-colors ${
+            className={` rounded-full shadow-sm border transition-colors ${
               isListeningAtThisIndex 
               ? "bg-red-50 border-red-200 text-red-500" 
               : "bg-white border-stone-200 text-stone-400 hover:text-stone-600 hover:bg-stone-50"

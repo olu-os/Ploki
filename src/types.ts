@@ -13,6 +13,7 @@ export interface Project {
   content: string;
   title_page: TitlePageData | null;
   updated_at: string;
+  deleted_at: string | null;
 }
 
 export interface ProjectVersion {

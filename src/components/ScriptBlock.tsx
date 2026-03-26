@@ -1,4 +1,5 @@
 import React from "react";
+import { Trash2 } from "lucide-react";
 import { ParsedBlock } from "../types";
 
 interface ScriptBlockProps {
@@ -36,10 +37,10 @@ export const ScriptBlock: React.FC<ScriptBlockProps> = ({ block, index, blocks, 
           newBlocks.splice(index, 1);
           updateBlocks(newBlocks);
         }}
-        className="absolute -left-8 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 transition-opacity p-4 min-w-10 min-h-10 flex items-center justify-center text-xl"
+        className="absolute -right-10 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 transition-opacity p-1.5 flex items-center justify-center"
         title="Delete block"
       >
-        ×
+        <Trash2 size={14} />
       </button>
       {block.type === "act_header" && (
         <div
@@ -83,7 +84,7 @@ export const ScriptBlock: React.FC<ScriptBlockProps> = ({ block, index, blocks, 
       {block.type === "dialogue_block" && (
         <div className="mt-2 mb-2 w-full flex flex-col items-center">
           <div className="w-3/5">
-            <div className="group/line relative uppercase text-black text-center leading-tight">
+            <div className="group/line relative uppercase text-black text-center leading-tight flex items-center justify-center gap-1">
               <div
                 contentEditable
                 suppressContentEditableWarning
@@ -102,13 +103,13 @@ export const ScriptBlock: React.FC<ScriptBlockProps> = ({ block, index, blocks, 
                   onClick={() => {
                     updateBlockParsed({ ...block.parsed, parenthetical: "parenthetical" });
                   }}
-                  className="absolute -left-6 top-1/2 -translate-y-1/2 opacity-0 group-hover/line:opacity-100 text-stone-400 hover:text-stone-600 transition-opacity text-[10px] font-bold"
+                  className="opacity-0 group-hover/line:opacity-100 text-stone-400 hover:text-stone-600 transition-opacity text-[10px] font-bold flex-shrink-0"
                   title="Add parenthetical"
                 >(+)</button>
               )}
             </div>
             {block.parsed.parenthetical && (
-              <div className="group/line relative text-black italic text-center leading-tight">
+              <div className="group/line relative text-black italic text-center leading-tight flex items-center justify-center gap-1">
                 <div
                   contentEditable
                   suppressContentEditableWarning
@@ -128,9 +129,9 @@ export const ScriptBlock: React.FC<ScriptBlockProps> = ({ block, index, blocks, 
                     newBlocks[index] = { ...newBlocks[index], parsed: { ...newBlocks[index].parsed, parenthetical: "" } };
                     updateBlocks(newBlocks);
                   }}
-                  className="absolute -right-6 top-1/2 -translate-y-1/2 opacity-0 group-hover/line:opacity-100 text-red-400 hover:text-red-600 transition-opacity text-xs"
+                  className="opacity-0 group-hover/line:opacity-100 text-red-400 hover:text-red-600"
                   title="Delete parenthetical"
-                >×</button>
+                ><Trash2 size={11} /></button>
               </div>
             )}
             <div className="group/line relative text-black leading-snug">

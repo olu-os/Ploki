@@ -38,11 +38,10 @@ export function parseNLP(text: string, characters: Character[], lastSpeaker: str
   let type: ParsedBlock["type"] = "action";
   let isContinued = false;
   const lowerText = processedText.toLowerCase();
-  // Accept both 'scene heading' and 'seen heading' in case of a mishearing
-  const sceneHeadingMatch = processedText.match(/^(scene|seen) heading:?:?\s*(.+)/i);
+  const sceneHeadingMatch = processedText.match(/^(scene|seen) heading:?:?\s*(.+)|^slugline:?\s*(.+)/i);
   if (sceneHeadingMatch) {
     type = "scene_heading";
-    parsedText = sceneHeadingMatch[2].trim().toUpperCase();
+    parsedText = (sceneHeadingMatch[2] ?? sceneHeadingMatch[3]).trim().toUpperCase();
     parsedText = parsedText.replace(/exterior/i, "EXT.").replace(/interior/i, "INT.");
   } else if (lowerText.startsWith("new scene") || lowerText.startsWith("new seen")) {
     type = "scene_heading";
@@ -69,7 +68,7 @@ export function parseNLP(text: string, characters: Character[], lastSpeaker: str
       cleanedText = (before + (before && after ? " " : "") + after).trim();
     }
 
-    const dialogueMatch = cleanedText.match(/^(.+?)\s+(says|said|asks|asked|yells|yelled|whispers|whispered|replies|replied|retorts|retorted|responds|responded|queries|queried|goes on|went on|continues|continued|shouts|shouted|screams|screamed|mumbles|mumbled|stutters|stuttered|exclaims|exclaimed|states|stated|mentions|mentioned|adds|added|tells|told|explains|explained|argues|argued|insists|insisted)(?:\s+(.+))?$/i);
+    const dialogueMatch = cleanedText.match(/^(.+?)\s+(says|said|asks|asked|yells|yelled|whispers|whispered|replies|replied|retorts|retorted|responds|responded|queries|queried|goes on|went on|continues|continued|shouts|shouted|screams|screamed|mumbles|mumbled|stutters|stuttered|exclaims|exclaimed|states|stated|mentions|mentioned|adds|added|tells|told|explains|explained|argues|argued|insists|insisted)[,:]?(?:\s+(.+))?$/i);
     if (dialogueMatch) {
       let speaker = dialogueMatch[1].trim();
       const action = dialogueMatch[2].toLowerCase();
