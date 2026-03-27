@@ -25,17 +25,17 @@ const PUNCTUATION_OPTIONS: { value: PunctuationMode; label: string; description:
   {
     value: "auto",
     label: "Automatic",
-    description: "Ploki adds punctuation automatically.",
+    description: "Ploki automatically adds punctuation and capitalisation (recommended).",
   },
   {
     value: "spoken",
     label: "Spoken",
-    description: 'You say the punctuation aloud — "comma", "period", "question mark", etc.',
+    description: 'You can say punctuation aloud — "comma", "period", "question mark", etc.',
   },
   {
     value: "none",
     label: "None",
-    description: "No punctuation is added.",
+    description: "No punctuation added.",
   },
 ];
 

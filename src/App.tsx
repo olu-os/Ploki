@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Mic, MicOff, Save, FileText, Users, Plus, Download, Undo, Redo, LogOut, History, Menu, X, Trash2, Settings } from "lucide-react";
+import logo from "../public/logo.png";
 import { Project, Character, ParsedBlock, ProjectVersion, TitlePageData } from "./types";
 import * as SpeechSDK from "microsoft-cognitiveservices-speech-sdk";
 import { supabase } from "./lib/supabase";
 import { parseNLP } from "./lib/parseNLP";
-import { replaceSpokenPunctuation } from "./lib/punctuation";
 import { paginateBlocks, Page } from "./lib/pagination";
 import { exportToTxt, exportToPdf } from "./lib/exportScript";
 import { InsertionBar } from "./components/InsertionBar";
@@ -50,6 +50,8 @@ export default function App() {
 
   const [showTitlePage, setShowTitlePage] = useState(false);
   const [loadingVersions, setLoadingVersions] = useState(false);
+  const [previewVersion, setPreviewVersion] = useState<ProjectVersion | null>(null);
+  const [savedBlocksBeforePreview, setSavedBlocksBeforePreview] = useState<ParsedBlock[] | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
   const [selectionBox, setSelectionBox] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
@@ -131,8 +133,19 @@ export default function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [selectedIndices]);
 
+  useEffect(() => {
+    if (isListeningRef.current && insertionIndexRef.current !== null && blocks.length < insertionIndexRef.current) {
+      insertionIndexRef.current = blocks.length;
+      setInsertionIndex(blocks.length);
+    }
+  }, [blocks]);
+
   const deleteSelected = () => {
     if (selectedIndices.size === 0) return;
+    if (isListeningRef.current && insertionIndexRef.current !== null) {
+      const deletedBefore = Array.from(selectedIndices).filter(idx => idx < insertionIndexRef.current).length;
+      insertionIndexRef.current = Math.max(0, insertionIndexRef.current - deletedBefore);
+    }
     updateBlocks(prev => prev.filter((_, i) => !selectedIndices.has(i)));
     setSelectedIndices(new Set());
   };
@@ -431,6 +444,18 @@ export default function App() {
     });
   };
 
+  const enterVersionPreview = (version: ProjectVersion) => {
+    setSavedBlocksBeforePreview(blocks);
+    setPreviewVersion(version);
+    parseContentToBlocks(version.content);
+  };
+
+  const exitVersionPreview = () => {
+    if (savedBlocksBeforePreview !== null) setBlocks(savedBlocksBeforePreview);
+    setPreviewVersion(null);
+    setSavedBlocksBeforePreview(null);
+  };
+
   const addCharacter = async () => {
     if (!newCharName) return;
     const { error } = await supabase
@@ -517,15 +542,15 @@ export default function App() {
 
   // Write to local storage on every change
   useEffect(() => {
-    if (!currentProject || blocks === undefined) return;
+    if (!currentProject || blocks === undefined || previewVersion) return;
     const content = blocksToContent(blocks);
     const draft = { content, title: currentProject.title, title_page: titlePage, ts: Date.now() };
     try { localStorage.setItem(draftKey(currentProject.id), JSON.stringify(draft)); } catch {}
-  }, [blocks, currentProject?.id, currentProject?.title, titlePage]);
+  }, [blocks, currentProject?.id, currentProject?.title, titlePage, previewVersion]);
 
   // Supabase save — clears localStorage on success
   useEffect(() => {
-    if (!currentProject || blocks === undefined) return;
+    if (!currentProject || blocks === undefined || previewVersion) return;
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = setTimeout(async () => {
       const content = blocksToContent(blocks);
@@ -582,7 +607,13 @@ export default function App() {
         speechConfig.outputFormat = SpeechSDK.OutputFormat.Detailed;
         const mode = settingsRef.current.punctuationMode;
         if (mode === "auto") {
-          speechConfig.setServiceProperty('punctuation', 'true', SpeechSDK.ServicePropertyChannel.UriQueryParameter);
+          speechConfig.setServiceProperty('punctuation', 'Automatic', SpeechSDK.ServicePropertyChannel.UriQueryParameter);
+        } else if (mode === "spoken") {
+          // Explicit mode but we read Lexical output (raw spoken words, no auto-punct)
+          speechConfig.setServiceProperty('punctuation', 'explicit', SpeechSDK.ServicePropertyChannel.UriQueryParameter);
+        } else {
+          // none: force Azure to strip all punctuation
+          speechConfig.setServiceProperty('punctuation', 'none', SpeechSDK.ServicePropertyChannel.UriQueryParameter);
         }
         speechConfig.setServiceProperty('itn', 'true', SpeechSDK.ServicePropertyChannel.UriQueryParameter);
         speechConfig.setProperty(SpeechSDK.PropertyId.Speech_SegmentationSilenceTimeoutMs, String(settingsRef.current.segmentationSilenceMs));
@@ -608,9 +639,17 @@ export default function App() {
               const json = e.result.properties.getProperty(SpeechSDK.PropertyId.SpeechServiceResponse_JsonResult);
               if (json) {
                 const parsed = JSON.parse(json);
-                text = settingsRef.current.punctuationMode === "auto"
-                  ? (parsed?.NBest?.[0]?.Display ?? parsed?.NBest?.[0]?.Lexical ?? text)
-                  : (parsed?.NBest?.[0]?.Lexical ?? text);
+                const best = parsed?.NBest?.[0];
+                if (settingsRef.current.punctuationMode === "auto") {
+                  // Use Display: fully formatted with punctuation and capitalisation
+                  text = best?.Display ?? best?.Lexical ?? text;
+                } else if (settingsRef.current.punctuationMode === "spoken") {
+                  // Use Lexical: raw spoken words so user's own punctuation words come through
+                  text = best?.Lexical ?? text;
+                } else {
+                  // none: use ITN (normalised, no punctuation)
+                  text = best?.ITN ?? best?.Lexical ?? text;
+                }
               }
             } catch {}
             onTranscript(text, true);
@@ -629,18 +668,13 @@ export default function App() {
         silenceTimerRef.current = setTimeout(() => {
           if (isListeningRef.current) toggleListeningRef.current();
         }, settingsRef.current.autoStopSilenceMs);
-        const interimText = settingsRef.current.punctuationMode === "spoken"
-          ? replaceSpokenPunctuation(text, false)
-          : text;
-        setTranscript(interimText);
+        setTranscript(text);
         return;
       }
 
       //prevents Azure from replacing next line, which we use as a marker for new lines in the spoken input, with \n
       const rawText = text.replace(/\n+/g, " next line ").trim();
-      const newFinalText = settingsRef.current.punctuationMode === "spoken"
-        ? replaceSpokenPunctuation(rawText, false)
-        : rawText;
+      const newFinalText = rawText;
       if (newFinalText) {
         const lowerText = newFinalText.toLowerCase();
 
@@ -820,7 +854,7 @@ export default function App() {
       {/* Sidebar */}
       <div className={`fixed inset-y-0 left-0 z-50 w-72 bg-stone-100 border-r border-stone-200 flex flex-col transition-transform duration-300 ease-in-out ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} md:relative md:w-64 md:translate-x-0 md:z-auto`}>
         <div className="p-4 border-b border-stone-200 flex items-center gap-2">
-          <Mic className="text-emerald-600" />
+          <img src={logo} alt="Ploki Logo" className="h-10 w-10 object-contain" />
           <h1 className="text-xl font-bold tracking-tight flex-1">Ploki</h1>
           <button className="md:hidden p-1 text-stone-400 hover:text-stone-600 rounded" onClick={() => setSidebarOpen(false)}>
             <X size={20} />
@@ -872,7 +906,7 @@ export default function App() {
                     if (showVersionHistory) fetchVersions(p.id);
                   }}
                   className={`w-full text-left px-3 py-2 pr-10 rounded text-sm flex items-center gap-2 ${
-                    currentProject?.id === p.id ? "bg-stone-200 font-medium" : "hover:bg-stone-200/50"
+                    activeTab === "editor" && currentProject?.id === p.id ? "bg-stone-200 font-medium" : "hover:bg-stone-200/50"
                   }`}
                 >
                   <FileText size={14} className="text-stone-500" />
@@ -1221,7 +1255,7 @@ export default function App() {
                 placeholder="Script Title"
               />
             ) : (
-              <h2 className="text-lg font-medium">Empty</h2>
+              <h2 className="text-lg font-medium"></h2>
             )}
           </div>
         </header>
@@ -1254,6 +1288,33 @@ export default function App() {
             </div>
           )}
 
+          {previewVersion && (
+            <div className="bg-white border-white-200 mb-8 px-4 py-2.5 flex items-center justify-between gap-4 flex-shrink-0">
+              <div className="flex items-center gap-2 text-black-700 text-base">
+                <History size={16} />
+                <span>Previewing version from {new Date(previewVersion.created_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={exitVersionPreview}
+                  className="px-3 py-1.5 text-sm font-medium bg-white border-1 border-white text-black rounded-md hover:bg-stone-100 transition-colors"
+                >
+                  Exit Preview
+                </button>
+                <button
+                  onClick={() => requestConfirm("Restore Version", "This will replace your current script with this version.", () => {
+                    parseContentToBlocks(previewVersion.content);
+                    setPreviewVersion(null);
+                    setSavedBlocksBeforePreview(null);
+                  })}
+                  className="px-3 py-1.5 text-sm font-medium bg-black text-white rounded-md hover:bg-stone-800 transition-colors"
+                >
+                  Restore
+                </button>
+              </div>
+            </div>
+          )}
+
           {activeTab === "editor" && currentProject?.deleted_at && (
             <div className="bg-white border-white-200 mb-8 px-4 py-2.5 flex items-center justify-between gap-4 flex-shrink-0">
               <div className="flex items-center gap-2 text-black-700 text-base">
@@ -1262,26 +1323,26 @@ export default function App() {
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={async () => {
-                    await supabase.from("projects").update({ deleted_at: null }).eq("id", currentProject.id);
-                    fetchProjects();
-                    fetchTrashedProjects();
-                    setCurrentProject(prev => prev ? { ...prev, deleted_at: null } : prev);
-                  }}
-                  className="px-3 py-1.5 text-sm font-medium bg-white border-1 border-white text-black rounded-md hover:bg-stone-100 transition-colors"
-                >
-                  Restore
-                </button>
-                <button
                   onClick={() => requestConfirm("Delete Permanently", "This script will be gone forever. This cannot be undone.", async () => {
                     await supabase.from("projects").delete().eq("id", currentProject.id);
                     fetchTrashedProjects();
                     setCurrentProject(null);
                     setBlocks([]);
                   })}
-                  className="px-3 py-1.5 text-sm font-medium bg-black text-white rounded-md hover:bg-stone-800 transition-colors"
+                  className="px-3 py-1.5 text-sm font-medium bg-white border-1 border-white text-black rounded-md hover:bg-stone-100 transition-colors"
                 >
                   Delete Permanently
+                </button>
+                <button
+                  onClick={async () => {
+                    await supabase.from("projects").update({ deleted_at: null }).eq("id", currentProject.id);
+                    fetchProjects();
+                    fetchTrashedProjects();
+                    setCurrentProject(prev => prev ? { ...prev, deleted_at: null } : prev);
+                  }}
+                  className="px-3 py-1.5 text-sm font-medium bg-black text-white rounded-md hover:bg-stone-800 transition-colors"
+                >
+                  Restore
                 </button>
               </div>
             </div>
@@ -1303,7 +1364,7 @@ export default function App() {
             <div id="script-content" className="w-full flex flex-col items-center relative">
               {selectionBox && Math.hypot(selectionBox.startX - selectionBox.endX, selectionBox.startY - selectionBox.endY) > 5 && (
                 <div 
-                  className="absolute border border-emerald-600 bg-emerald-600/5 pointer-events-none z-[100]"
+                  className="absolute border border-black-600 bg-black-600/5 pointer-events-none z-[100]"
                   style={{
                     left: Math.min(selectionBox.startX, selectionBox.endX),
                     top: Math.min(selectionBox.startY, selectionBox.endY),
@@ -1318,6 +1379,12 @@ export default function App() {
                     <div
                       contentEditable
                       suppressContentEditableWarning
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          e.currentTarget.blur();
+                        }
+                      }}
                       onBlur={e => { const v = e.currentTarget.innerText.trim(); updateTitlePage({ title: v }); }}
                       className="font-bold underline uppercase text-center outline-none min-w-[4px] empty:before:content-['Title'] empty:before:text-stone-300 empty:before:normal-case empty:before:no-underline"
                     >{titlePage.title}</div>
@@ -1559,12 +1626,18 @@ export default function App() {
             ) : (
               <ul className="space-y-1">
                 {versions.map((v) => (
-                  <li key={v.id} className="group flex items-center justify-between px-3 py-2.5 rounded hover:bg-stone-50">
+                  <li
+                    key={v.id}
+                    className={`group flex items-center justify-between px-3 py-2.5 rounded cursor-pointer ${
+                      previewVersion?.id === v.id ? 'bg-stone-100 text-amber-900' : 'hover:bg-stone-50'
+                    }`}
+                    onClick={() => enterVersionPreview(v)}
+                  >
                     <span className="text-xs text-stone-600">
                       {new Date(v.created_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                     </span>
                     <button
-                      onClick={() => restoreVersion(v)}
+                      onClick={(e) => { e.stopPropagation(); restoreVersion(v); }}
                       className="text-xs text-stone-400 hover:text-emerald-600 opacity-0 group-hover:opacity-100 transition-opacity font-medium"
                     >
                       Restore

@@ -28,7 +28,7 @@ export const ScriptBlock: React.FC<ScriptBlockProps> = ({ block, index, blocks, 
   return (
     <div 
       key={index} 
-      className={`group relative transition-colors duration-200 rounded-xs px-2 -mx-2 ${isSelected ? 'bg-emerald-50/80 ring-1 ring-emerald-700' : ''}`}
+      className={`group relative transition-colors duration-200 rounded-xs 2px px-2 -mx-2 ${isSelected ? 'bg-emerald-50/80 ring-1 ring-emerald-700' : ''}`}
       data-block-index={index}
     >
       <button
@@ -46,6 +46,12 @@ export const ScriptBlock: React.FC<ScriptBlockProps> = ({ block, index, blocks, 
         <div
           contentEditable
           suppressContentEditableWarning
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              e.currentTarget.blur();
+            }
+          }}
           onBlur={(e) => {
             const val = e.currentTarget.innerText.trim();
             if (val !== block.parsed) updateBlockParsed(val);
@@ -59,6 +65,12 @@ export const ScriptBlock: React.FC<ScriptBlockProps> = ({ block, index, blocks, 
         <div 
           contentEditable
           suppressContentEditableWarning
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              e.currentTarget.blur();
+            }
+          }}
           onBlur={(e) => {
             const val = e.currentTarget.innerText.trim();
             if (val !== block.parsed) updateBlockParsed(val);
@@ -72,6 +84,12 @@ export const ScriptBlock: React.FC<ScriptBlockProps> = ({ block, index, blocks, 
         <div 
           contentEditable
           suppressContentEditableWarning
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              e.currentTarget.blur();
+            }
+          }}
           onBlur={(e) => {
             const val = e.currentTarget.innerText.trim();
             if (val !== block.parsed) updateBlockParsed(val);
@@ -88,6 +106,12 @@ export const ScriptBlock: React.FC<ScriptBlockProps> = ({ block, index, blocks, 
               <div
                 contentEditable
                 suppressContentEditableWarning
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    e.currentTarget.blur();
+                  }
+                }}
                 onBlur={(e) => {
                   const val = e.currentTarget.innerText.trim();
                   if (val !== block.parsed.speaker) {
@@ -113,6 +137,12 @@ export const ScriptBlock: React.FC<ScriptBlockProps> = ({ block, index, blocks, 
                 <div
                   contentEditable
                   suppressContentEditableWarning
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      e.currentTarget.blur();
+                    }
+                  }}
                   onBlur={(e) => {
                     const val = e.currentTarget.innerText.trim().replace(/[()]/g, "");
                     if (val !== block.parsed.parenthetical) {
@@ -138,6 +168,12 @@ export const ScriptBlock: React.FC<ScriptBlockProps> = ({ block, index, blocks, 
               <div
                 contentEditable
                 suppressContentEditableWarning
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    e.currentTarget.blur();
+                  }
+                }}
                 onBlur={(e) => {
                   const val = e.currentTarget.innerText.trim();
                   if (val !== block.parsed.dialogue) {
@@ -156,6 +192,12 @@ export const ScriptBlock: React.FC<ScriptBlockProps> = ({ block, index, blocks, 
         <div 
           contentEditable
           suppressContentEditableWarning
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              e.currentTarget.blur();
+            }
+          }}
           onBlur={(e) => {
             const val = e.currentTarget.innerText.trim();
             if (val !== block.parsed) updateBlockParsed(val);

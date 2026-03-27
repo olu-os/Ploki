@@ -18,6 +18,16 @@ describe('parseNLP', () => {
     expect(result2.parsed).toBe('EXT. PARK EVENING');
   });
 
+  it('should parse natural scene headings (interior/exterior/int./ext.)', () => {
+    const result = parseNLP('interior kitchen day', [], null);
+    expect(result.type).toBe('scene_heading');
+    expect(result.parsed).toBe('INT. KITCHEN DAY');
+
+    const result2 = parseNLP('ext. park night', [], null);
+    expect(result2.type).toBe('scene_heading');
+    expect(result2.parsed).toBe('EXT. PARK NIGHT');
+  });
+
   it('should parse transitions correctly', () => {
     const result = parseNLP('cut to black', [], null);
     expect(result.type).toBe('transition');
@@ -28,6 +38,16 @@ describe('parseNLP', () => {
     const result = parseNLP('act one', [], null);
     expect(result.type).toBe('act_header');
     expect(result.parsed).toBe('ACT ONE');
+  });
+
+  it('should parse natural act headers (act 2, act three)', () => {
+    const result = parseNLP('act 2', [], null);
+    expect(result.type).toBe('act_header');
+    expect(result.parsed).toBe('ACT 2');
+
+    const result2 = parseNLP('act three', [], null);
+    expect(result2.type).toBe('act_header');
+    expect(result2.parsed).toBe('ACT THREE');
   });
 
   it('should parse dialogue with speaker and action', () => {
@@ -131,5 +151,21 @@ describe('parseNLP', () => {
     const result = parseNLP('mary jane runs down the hall', multiWordChars, null);
     expect(result.type).toBe('action');
     expect(result.parsed).toBe('Mary Jane runs down the hall');
+  });
+
+  it('should parse as an action if there are over two words before the action verb', () => {
+    const result = parseNLP('the clock outside  says it is 9pm', mockCharacters, null);
+    expect(result.type).toBe('action');
+    expect(result.parsed).toBe('The clock outside says it is 9pm');
+  });
+
+  it('should handle dialogue with just a period after the verb', () => {
+    const result = parseNLP('Emilio says.', mockCharacters, null);
+    expect(result.type).toBe('dialogue_block');
+    expect(result.parsed).toEqual({
+      speaker: 'EMILIO',
+      parenthetical: '',
+      dialogue: ''
+    });
   });
 });
