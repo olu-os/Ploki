@@ -1,16 +1,12 @@
 import React, { useState, useEffect } from "react";
 
-export type PunctuationMode = "auto" | "spoken" | "none";
-
 export interface AppSettings {
-  punctuationMode: PunctuationMode;
   segmentationSilenceMs: number;
   autoStopSilenceMs: number;
   dailyWordGoal: number;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  punctuationMode: "auto",
   segmentationSilenceMs: 1500,
   autoStopSilenceMs: 20000,
   dailyWordGoal: 500,
@@ -20,24 +16,6 @@ interface Props {
   settings: AppSettings;
   onChange: (patch: Partial<AppSettings>) => void;
 }
-
-const PUNCTUATION_OPTIONS: { value: PunctuationMode; label: string; description: string }[] = [
-  {
-    value: "auto",
-    label: "Automatic",
-    description: "Ploki automatically adds punctuation and capitalisation (recommended).",
-  },
-  {
-    value: "spoken",
-    label: "Spoken",
-    description: 'You can say punctuation aloud — "comma", "period", "question mark", etc.',
-  },
-  {
-    value: "none",
-    label: "None",
-    description: "No punctuation added.",
-  },
-];
 
 function SliderRow({
   label,
@@ -79,7 +57,7 @@ function SliderRow({
           className="w-full h-1.5 bg-stone-200 rounded-full appearance-none cursor-pointer accent-stone-800"
         />
         <span
-          className="absolute top-7 text-xs font-mono font-medium text-stone-600 -translate-x-1/2 pointer-events-none bg-white px-1.5 py-0.5 rounded"
+          className="absolute top-7 text-xs font-medium font-medium text-stone-600 -translate-x-1/2 pointer-events-none bg-white px-1.5 py-0.5 rounded"
           style={{ left: `calc(${pct}% + ${offsetPx}px)` }}
         >
           {format(value)}
@@ -118,36 +96,7 @@ export function SettingsTab({ settings, onChange }: Props) {
   return (
     <div className="w-full max-w-2xl flex flex-col gap-6">
 
-      {/* Punctuation */}
-      <div className="bg-white rounded-sm shadow-sm border border-stone-200 overflow-hidden">
-        <div className="px-6 py-4 border-b border-stone-100">
-          <h3 className="text-sm font-semibold text-stone-700 uppercase tracking-wider">Punctuation</h3>
-          <p className="text-xs text-stone-400 mt-0.5">How punctuation is added to your dictated text.</p>
-        </div>
-        <div className="divide-y divide-stone-100">
-          {PUNCTUATION_OPTIONS.map((opt) => (
-            <label
-              key={opt.value}
-              className={`flex items-start gap-4 px-6 py-4 cursor-pointer transition-colors ${
-                settings.punctuationMode === opt.value ? "bg-stone-50" : "hover:bg-stone-50/60"
-              }`}
-            >
-              <input
-                type="radio"
-                name="punctuationMode"
-                value={opt.value}
-                checked={settings.punctuationMode === opt.value}
-                onChange={() => onChange({ punctuationMode: opt.value })}
-                className="mt-0.5 accent-stone-800 flex-shrink-0"
-              />
-              <div>
-                <p className="text-sm font-medium text-stone-800">{opt.label}</p>
-                <p className="text-xs text-stone-400 mt-0.5">{opt.description}</p>
-              </div>
-            </label>
-          ))}
-        </div>
-      </div>
+      {/* (Punctuation option removed: Azure will provide explicit punctuation) */}
 
       {/* Voice Timing */}
       <div className="bg-white rounded-sm shadow-sm border border-stone-200 overflow-hidden">

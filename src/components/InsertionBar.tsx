@@ -3,7 +3,7 @@ import { Mic, Plus } from "lucide-react";
 
 interface InsertionBarProps {
   index: number;
-  onInsert: (index: number, type: string, template: any) => void;
+  onInsert: (index: number, type: "action" | "scene_heading" | "transition" | "dialogue_block" | "act_header", template: any) => void;
   onStartDictation: (index: number) => void;
   isListeningAtThisIndex: boolean;
   accumulatedTranscript: string;

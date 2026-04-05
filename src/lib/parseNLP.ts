@@ -1,7 +1,7 @@
 import { Character, ParsedBlock } from "../types";
 
 export function parseNLP(text: string, characters: Character[], lastSpeaker: string | null): ParsedBlock & { isContinued?: boolean } {
-  let processedText = text;
+  let processedText = text.trim();
 
   if (characters && characters.length > 0) {
     const allMappings: { pattern: string, replacement: string }[] = [];
@@ -87,7 +87,7 @@ export function parseNLP(text: string, characters: Character[], lastSpeaker: str
       
       if (beforeVerbWordCount > 2) {
         type = "action";
-        parsedText = processedText.charAt(0).toUpperCase() + processedText.slice(1);
+        parsedText = (processedText.charAt(0).toUpperCase() + processedText.slice(1)).replace(/\s{2,}/g, ' ');
       } else {
         let dialogue = dialogueMatch[3] ? dialogueMatch[3].trim().replace(/^['"]|['"]$/g, "") : "";
         const action = dialogueMatch[2].toLowerCase();

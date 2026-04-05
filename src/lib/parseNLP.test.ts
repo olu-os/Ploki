@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { parseNLP } from './parseNLP';
 import { Character } from '../types';
+import { replaceSpokenPunctuation } from './punctuation';
 
 describe('parseNLP', () => {
   const mockCharacters: Character[] = [

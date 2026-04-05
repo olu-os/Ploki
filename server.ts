@@ -46,7 +46,7 @@ db.exec(`
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = 3001;
 
   app.use(express.json());
 
@@ -147,7 +147,7 @@ async function startServer() {
     
     // Fetch characters for alias matching
     const stmt = db.prepare("SELECT * FROM characters WHERE user_id = ?");
-    const characters = stmt.all(currentUser);
+    const characters = stmt.all(currentUser) as Array<{ canonical_name: string; aliases: string }>;
     
     // Simple parsing logic
     let parsedText = text;

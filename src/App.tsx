@@ -5,6 +5,7 @@ import { Project, Character, ParsedBlock, ProjectVersion, TitlePageData } from "
 import * as SpeechSDK from "microsoft-cognitiveservices-speech-sdk";
 import { supabase } from "./lib/supabase";
 import { parseNLP } from "./lib/parseNLP";
+import { replaceSpokenPunctuation } from "./lib/punctuation";
 import { paginateBlocks, Page } from "./lib/pagination";
 import { exportToTxt, exportToPdf } from "./lib/exportScript";
 import { InsertionBar } from "./components/InsertionBar";
@@ -143,8 +144,9 @@ export default function App() {
   const deleteSelected = () => {
     if (selectedIndices.size === 0) return;
     if (isListeningRef.current && insertionIndexRef.current !== null) {
-      const deletedBefore = Array.from(selectedIndices).filter(idx => idx < insertionIndexRef.current).length;
-      insertionIndexRef.current = Math.max(0, insertionIndexRef.current - deletedBefore);
+      const insertionIdx = insertionIndexRef.current;
+      const deletedBefore = Array.from(selectedIndices).filter(idx => idx < insertionIdx).length;
+      insertionIndexRef.current = Math.max(0, insertionIdx - deletedBefore);
     }
     updateBlocks(prev => prev.filter((_, i) => !selectedIndices.has(i)));
     setSelectedIndices(new Set());
@@ -605,16 +607,8 @@ export default function App() {
         const speechConfig = SpeechSDK.SpeechConfig.fromAuthorizationToken(token, region);
         speechConfig.speechRecognitionLanguage = "en-US";
         speechConfig.outputFormat = SpeechSDK.OutputFormat.Detailed;
-        const mode = settingsRef.current.punctuationMode;
-        if (mode === "auto") {
-          speechConfig.setServiceProperty('punctuation', 'Automatic', SpeechSDK.ServicePropertyChannel.UriQueryParameter);
-        } else if (mode === "spoken") {
-          // Explicit mode but we read Lexical output (raw spoken words, no auto-punct)
-          speechConfig.setServiceProperty('punctuation', 'explicit', SpeechSDK.ServicePropertyChannel.UriQueryParameter);
-        } else {
-          // none: force Azure to strip all punctuation
-          speechConfig.setServiceProperty('punctuation', 'none', SpeechSDK.ServicePropertyChannel.UriQueryParameter);
-        }
+        // Always request explicit punctuation from Azure (user will speak punctuation)
+        speechConfig.setServiceProperty('punctuation', 'explicit', SpeechSDK.ServicePropertyChannel.UriQueryParameter);
         speechConfig.setServiceProperty('itn', 'true', SpeechSDK.ServicePropertyChannel.UriQueryParameter);
         speechConfig.setProperty(SpeechSDK.PropertyId.Speech_SegmentationSilenceTimeoutMs, String(settingsRef.current.segmentationSilenceMs));
         
@@ -640,16 +634,8 @@ export default function App() {
               if (json) {
                 const parsed = JSON.parse(json);
                 const best = parsed?.NBest?.[0];
-                if (settingsRef.current.punctuationMode === "auto") {
-                  // Use Display: fully formatted with punctuation and capitalisation
-                  text = best?.Display ?? best?.Lexical ?? text;
-                } else if (settingsRef.current.punctuationMode === "spoken") {
-                  // Use Lexical: raw spoken words so user's own punctuation words come through
-                  text = best?.Lexical ?? text;
-                } else {
-                  // none: use ITN (normalised, no punctuation)
-                  text = best?.ITN ?? best?.Lexical ?? text;
-                }
+                // Use Lexical output so spoken punctuation words are preserved (Azure configured to explicit)
+                text = best?.Lexical ?? best?.ITN ?? best?.Display ?? text;
               }
             } catch {}
             onTranscript(text, true);
@@ -663,17 +649,19 @@ export default function App() {
     };
 
     const handleTranscript = (text: string, isFinal: boolean) => {
+      // Always apply spoken punctuation replacement first
+      const punctuatedText = replaceSpokenPunctuation(text);
       if (!isFinal) {
         if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
         silenceTimerRef.current = setTimeout(() => {
           if (isListeningRef.current) toggleListeningRef.current();
         }, settingsRef.current.autoStopSilenceMs);
-        setTranscript(text);
+        setTranscript(punctuatedText);
         return;
       }
 
       //prevents Azure from replacing next line, which we use as a marker for new lines in the spoken input, with \n
-      const rawText = text.replace(/\n+/g, " next line ").trim();
+      const rawText = punctuatedText.replace(/\n+/g, " next line ").trim();
       const newFinalText = rawText;
       if (newFinalText) {
         const lowerText = newFinalText.toLowerCase();
@@ -813,7 +801,7 @@ export default function App() {
   processSpeechRef.current = processSpeech;
   toggleListeningRef.current = () => toggleListening();
 
-  const insertTemplate = (index: number, type: string, parsed: any) => {
+  const insertTemplate = (index: number, type: ParsedBlock["type"], parsed: any) => {
     const newBlocks = [...blocks];
     newBlocks.splice(index, 0, {
       type,
