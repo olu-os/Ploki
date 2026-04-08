@@ -1020,11 +1020,11 @@ export default function App() {
           <div className="mb-4">
             <div className="flex justify-between items-center mb-1">
               <span className="text-xs font-medium text-stone-500 uppercase">Daily Goal</span>
-              <span className="text-xs font-medium text-emerald-600">{wordCount} / {settings.dailyWordGoal}</span>
+              <span className="text-xs font-medium text-emerald-700">{wordCount} / {settings.dailyWordGoal}</span>
             </div>
             <div className="w-full bg-stone-200 rounded-full h-1.5">
               <div 
-                className="bg-emerald-500 h-1.5 rounded-full transition-all duration-500" 
+                className="bg-emerald-600 h-1.5 rounded-full transition-all duration-500" 
                 style={{ width: `${Math.min((wordCount / settings.dailyWordGoal) * 100, 100)}%` }}
               ></div>
             </div>
@@ -1079,7 +1079,7 @@ export default function App() {
               className={`order-3 md:order-4 flex-shrink-0 flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-full transition-colors ${
                 isListening
                   ? "bg-red-100 text-red-700 hover:bg-red-200"
-                  : "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
+                  : "bg-emerald-100 text-emerald-800 hover:bg-emerald-200"
               }`}
               title={isListening ? "Stop Listening (Ctrl+.)" : "Start Listening (Ctrl+.)"}
             >

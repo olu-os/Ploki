@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parseNLP } from './parseNLP';
 import { Character } from '../types';
-import { replaceSpokenPunctuation } from './punctuation';
 
 describe('parseNLP', () => {
   const mockCharacters: Character[] = [
@@ -108,7 +107,6 @@ describe('parseNLP', () => {
   });
 
   it('should detect continued dialogue (CONT\'D)', () => {
-    // Emilio spoke last
     const result = parseNLP('Emilio continued I have more to say', mockCharacters, 'EMILIO');
     expect(result.type).toBe('dialogue_block');
     expect(result.isContinued).toBe(true);
@@ -168,5 +166,72 @@ describe('parseNLP', () => {
       parenthetical: '',
       dialogue: ''
     });
+  });
+
+  it('should return isContinued=false when lastSpeaker differs', () => {
+    const result = parseNLP('Emilio continued I have more to say', mockCharacters, 'CASSANDRA');
+    expect(result.isContinued).toBe(false);
+  });
+
+  it('should handle "goes on" as a continued dialogue verb', () => {
+    const result = parseNLP('Emilio goes on and on', mockCharacters, 'EMILIO');
+    expect(result.type).toBe('dialogue_block');
+    expect(result.isContinued).toBe(true);
+  });
+
+  it('should handle "fade out" as a transition', () => {
+    const result = parseNLP('fade out', [], null);
+    expect(result.type).toBe('transition');
+    expect(result.parsed).toBe('FADE OUT:');
+  });
+
+  it('should handle "act header:" keyword form', () => {
+    const result = parseNLP('act header: prologue', [], null);
+    expect(result.type).toBe('act_header');
+    expect(result.parsed).toBe('PROLOGUE');
+  });
+
+  it('should handle "slugline" as a scene heading', () => {
+    const result = parseNLP('slugline ext. rooftop night', [], null);
+    expect(result.type).toBe('scene_heading');
+    expect(result.parsed).toBe('EXT. ROOFTOP NIGHT');
+  });
+
+  it('should handle inline parenthetical inside dialogue string', () => {
+    const result = parseNLP('Emilio says I am fine (nervously) trust me', mockCharacters, null);
+    expect(result.type).toBe('dialogue_block');
+    expect(result.parsed.parenthetical).toBe('nervously');
+    expect(result.parsed.dialogue).toBe('I am fine trust me');
+  });
+
+  it('should preserve punctuation in action lines', () => {
+    const result = parseNLP('She opens the door. It creaks.', [], null);
+    expect(result.type).toBe('action');
+    expect(result.parsed).toBe('She opens the door. It creaks.');
+  });
+
+  it('should handle empty string input as action', () => {
+    const result = parseNLP('', [], null);
+    expect(result.type).toBe('action');
+  });
+
+  it('should handle dialogue spoken with "whispers"', () => {
+    const result = parseNLP('Emilio whispers keep it down', mockCharacters, null);
+    expect(result.type).toBe('dialogue_block');
+    expect(result.parsed.speaker).toBe('EMILIO');
+    expect(result.parsed.dialogue).toBe('Keep it down');
+  });
+
+  it('should uppercase an unknown speaker name', () => {
+    const result = parseNLP('John says hello', [], null);
+    expect(result.type).toBe('dialogue_block');
+    expect(result.parsed.speaker).toBe('JOHN');
+    expect(result.parsed.dialogue).toBe('Hello');
+  });
+
+  it('should preserve the original text in result.original', () => {
+    const text = 'She walks slowly.';
+    const result = parseNLP(text, [], null);
+    expect(result.original).toBe(text);
   });
 });
