@@ -34,6 +34,8 @@ Add characters in the Characters panel. You can give each character aliases (nic
 ### Select & Delete Blocks
 Click and drag on the script background to draw a selection box around multiple blocks. Selected blocks are highlighted. Press **Delete** or **Backspace** to remove them.
 
+You can also click on the text to edit it in-line.
+
 ### Title Page
 Click **Title Page** at the top of the editor to expand and edit the title, author, and other title-page fields.
 
