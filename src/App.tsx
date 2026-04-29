@@ -609,7 +609,7 @@ export default function App() {
         speechConfig.outputFormat = SpeechSDK.OutputFormat.Detailed;
         // Always request explicit punctuation from Azure (user will speak punctuation)
         speechConfig.setServiceProperty('punctuation', 'explicit', SpeechSDK.ServicePropertyChannel.UriQueryParameter);
-        speechConfig.setServiceProperty('itn', 'true', SpeechSDK.ServicePropertyChannel.UriQueryParameter);
+        speechConfig.setServiceProperty('itn', settingsRef.current.numberFormat === 'digits' ? 'true' : 'false', SpeechSDK.ServicePropertyChannel.UriQueryParameter);
         speechConfig.setProperty(SpeechSDK.PropertyId.Speech_SegmentationSilenceTimeoutMs, String(settingsRef.current.segmentationSilenceMs));
         
         const audioConfig = SpeechSDK.AudioConfig.fromDefaultMicrophoneInput();

@@ -4,12 +4,14 @@ export interface AppSettings {
   segmentationSilenceMs: number;
   autoStopSilenceMs: number;
   dailyWordGoal: number;
+  numberFormat: 'digits' | 'words';
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
   segmentationSilenceMs: 1500,
   autoStopSilenceMs: 20000,
   dailyWordGoal: 500,
+  numberFormat: 'digits',
 };
 
 interface Props {
@@ -97,6 +99,44 @@ export function SettingsTab({ settings, onChange }: Props) {
     <div className="w-full max-w-2xl flex flex-col gap-6">
 
       {/* (Punctuation option removed: Azure will provide explicit punctuation) */}
+
+      {/* Recognition */}
+      <div className="bg-white rounded-sm shadow-sm border border-stone-200 overflow-hidden">
+        <div className="px-6 py-4 border-b border-stone-100">
+          <h3 className="text-sm font-semibold text-stone-700 uppercase tracking-wider">Recognition</h3>
+          <p className="text-xs text-stone-400 mt-0.5">Control how spoken content is transcribed.</p>
+        </div>
+        <div className="px-6 py-5">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-medium text-stone-800">Number format</p>
+              <p className="text-xs text-stone-400 mt-0.5">Whether spoken numbers appear as digits ("25") or words ("twenty five").</p>
+            </div>
+            <div className="flex rounded-md overflow-hidden border border-stone-200 text-sm">
+              <button
+                className={`px-4 py-1.5 ${
+                  settings.numberFormat === 'digits'
+                    ? 'bg-stone-800 text-white'
+                    : 'bg-white text-stone-600 hover:bg-stone-50'
+                }`}
+                onClick={() => onChange({ numberFormat: 'digits' })}
+              >
+                Digits
+              </button>
+              <button
+                className={`px-4 py-1.5 border-l border-stone-200 ${
+                  settings.numberFormat === 'words'
+                    ? 'bg-stone-800 text-white'
+                    : 'bg-white text-stone-600 hover:bg-stone-50'
+                }`}
+                onClick={() => onChange({ numberFormat: 'words' })}
+              >
+                Words
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Voice Timing */}
       <div className="bg-white rounded-sm shadow-sm border border-stone-200 overflow-hidden">
