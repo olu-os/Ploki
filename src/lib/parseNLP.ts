@@ -80,7 +80,7 @@ export function parseNLP(text: string, characters: Character[], lastSpeaker: str
       cleanedText = (before + (before && after ? " " : "") + after).trim();
     }
 
-    const dialogueMatch = cleanedText.match(/^(.+?)\s+(says|said|asks|asked|yells|yelled|whispers|whispered|replies|replied|retorts|retorted|responds|responded|queries|queried|goes on|went on|continues|continued|shouts|shouted|screams|screamed|mumbles|mumbled|stutters|stuttered|exclaims|exclaimed|states|stated|mentions|mentioned|adds|added|tells|told|explains|explained|argues|argued|insists|insisted)[,:.]*(?:\s+(.+))?$/i);
+    const dialogueMatch = cleanedText.match(/^(.+?)\s+(says|said|asks|asked|yells|yelled|whispers|whispered|replies|replied|retorts|retorted|responds|responded|queries|queried|goes on|went on|continues|continued|shouts|shouted|screams|screamed|mumbles|mumbled|stutters|stuttered|exclaims|exclaimed|states|stated|mentions|mentioned|adds|added|explains|explained|argues|argued|insists|insisted)[,:.]*(?:\s+(.+))?$/i);
     if (dialogueMatch) {
       let speaker = dialogueMatch[1].trim();
       const beforeVerbWordCount = speaker.split(/\s+/).filter(Boolean).length;

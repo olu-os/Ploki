@@ -634,8 +634,11 @@ export default function App() {
               if (json) {
                 const parsed = JSON.parse(json);
                 const best = parsed?.NBest?.[0];
-                // Use Lexical output so spoken punctuation words are preserved (Azure configured to explicit)
-                text = best?.Lexical ?? best?.ITN ?? best?.Display ?? text;
+                if (settingsRef.current.numberFormat === 'digits') {
+                  text = best?.ITN ?? best?.Lexical ?? best?.Display ?? text;
+                } else {
+                  text = best?.Lexical ?? best?.Display ?? text;
+                }
               }
             } catch {}
             onTranscript(text, true);

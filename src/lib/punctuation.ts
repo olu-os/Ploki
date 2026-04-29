@@ -89,8 +89,7 @@ for (const [word, symbol] of Object.entries(punctuationMap)) {
   // Capitalize standalone "i"
   result = result.replace(/\bi\b/g, "I");
 
-  // Final cleanup: remove punctuation immediately before or after parentheses
-  // Remove any punctuation directly before an opening parenthesis and ensure one space before '('
+  // Remove punctuation immediately before an open parenthesis
   result = result.replace(/([.,!?:;])\s*\(/g, ' (');
   // Normalize spaces around parentheses
   result = result.replace(/\s*\(\s*/g, " (");
