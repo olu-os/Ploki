@@ -85,7 +85,7 @@ export function parseNLP(text: string, characters: Character[], lastSpeaker: str
       let speaker = dialogueMatch[1].trim();
       const beforeVerbWordCount = speaker.split(/\s+/).filter(Boolean).length;
       
-      if (beforeVerbWordCount > 2) {
+      if (beforeVerbWordCount > 3) {
         type = "action";
         parsedText = (processedText.charAt(0).toUpperCase() + processedText.slice(1)).replace(/\s{2,}/g, ' ');
       } else {

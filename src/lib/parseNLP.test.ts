@@ -152,10 +152,20 @@ describe('parseNLP', () => {
     expect(result.parsed).toBe('Mary Jane runs down the hall');
   });
 
-  it('should parse as an action if there are over two words before the action verb', () => {
-    const result = parseNLP('the clock outside  says it is 9pm', mockCharacters, null);
+  it('should parse as an action if there are over three words before the action verb', () => {
+    const result = parseNLP('the little red clock  says it is 9pm', mockCharacters, null);
     expect(result.type).toBe('action');
-    expect(result.parsed).toBe('The clock outside says it is 9pm');
+    expect(result.parsed).toBe('The little red clock says it is 9pm');
+  });
+
+  it('should parse as dialogue with three words before the verb', () => {
+    const result = parseNLP('the clock outside says it is 9pm', mockCharacters, null);
+    expect(result.type).toBe('dialogue_block');
+    expect(result.parsed).toEqual({
+      speaker: 'THE CLOCK OUTSIDE',
+      parenthetical: '',
+      dialogue: 'It is 9pm'
+    });
   });
 
   it('should handle dialogue with just a period after the verb', () => {

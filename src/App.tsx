@@ -271,6 +271,8 @@ export default function App() {
     settingsRef.current = settings;
     localStorage.setItem("ploki_settings", JSON.stringify(settings));
   }, [settings]);
+  const prevPunctuationModeRef = useRef(settings.punctuationMode);
+  const restartRecognitionRef = useRef(false);
 
   const updateSettings = (patch: Partial<AppSettings>) =>
     setSettings(prev => ({ ...prev, ...patch }));
@@ -572,6 +574,18 @@ export default function App() {
     return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current); };
   }, [blocks, currentProject?.title, currentProject?.id, titlePage]);
 
+  // Restart recognition when punctuation mode changes no reload needed.
+  useEffect(() => {
+    const prev = prevPunctuationModeRef.current;
+    prevPunctuationModeRef.current = settings.punctuationMode;
+    if (prev !== settings.punctuationMode && isListeningRef.current) {
+      restartRecognitionRef.current = true;
+      pendingStopRef.current = false;
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      recognitionRef.current?.stop();
+    }
+  }, [settings.punctuationMode]);
+
   // Speech Recognition Setup (Azure)
   useEffect(() => {
     const stopAzure = () => {
@@ -591,7 +605,16 @@ export default function App() {
           }
           azureRecognizerRef.current?.close();
           azureRecognizerRef.current = null;
+          if (restartRecognitionRef.current) {
+            restartRecognitionRef.current = false;
+            isListeningRef.current = true;
+            startAzure(handleTranscript);
+          }
         });
+      } else if (restartRecognitionRef.current) {
+        restartRecognitionRef.current = false;
+        isListeningRef.current = true;
+        startAzure(handleTranscript);
       }
     };
 
@@ -607,8 +630,18 @@ export default function App() {
         const speechConfig = SpeechSDK.SpeechConfig.fromAuthorizationToken(token, region);
         speechConfig.speechRecognitionLanguage = "en-US";
         speechConfig.outputFormat = SpeechSDK.OutputFormat.Detailed;
-        // Always request explicit punctuation from Azure (user will speak punctuation)
-        speechConfig.setServiceProperty('punctuation', 'explicit', SpeechSDK.ServicePropertyChannel.UriQueryParameter);
+        // Punctuation mode:
+        // auto   -> Azure adds punctuation automatically (Display output)
+        // spoken -> only punctuation the user speaks aloud comes through (Lexical output)
+        // none   -> strip all punctuation (ITN output)
+        const punctuationMode = settingsRef.current.punctuationMode;
+        if (punctuationMode === "auto") {
+          speechConfig.setServiceProperty('punctuation', 'true', SpeechSDK.ServicePropertyChannel.UriQueryParameter);
+        } else if (punctuationMode === "spoken") {
+          speechConfig.setServiceProperty('punctuation', 'explicit', SpeechSDK.ServicePropertyChannel.UriQueryParameter);
+        } else {
+          speechConfig.setServiceProperty('punctuation', 'none', SpeechSDK.ServicePropertyChannel.UriQueryParameter);
+        }
         speechConfig.setServiceProperty('itn', settingsRef.current.numberFormat === 'digits' ? 'true' : 'false', SpeechSDK.ServicePropertyChannel.UriQueryParameter);
         speechConfig.setProperty(SpeechSDK.PropertyId.Speech_SegmentationSilenceTimeoutMs, String(settingsRef.current.segmentationSilenceMs));
         
@@ -634,10 +667,12 @@ export default function App() {
               if (json) {
                 const parsed = JSON.parse(json);
                 const best = parsed?.NBest?.[0];
-                if (settingsRef.current.numberFormat === 'digits') {
-                  text = best?.ITN ?? best?.Lexical ?? best?.Display ?? text;
+                if (settingsRef.current.punctuationMode === "auto") {
+                  text = best?.Display ?? best?.Lexical ?? text;
+                } else if (settingsRef.current.punctuationMode === "spoken") {
+                  text = best?.Lexical ?? text;
                 } else {
-                  text = best?.Lexical ?? best?.Display ?? text;
+                  text = best?.ITN ?? best?.Lexical ?? text;
                 }
               }
             } catch {}
@@ -652,8 +687,11 @@ export default function App() {
     };
 
     const handleTranscript = (text: string, isFinal: boolean) => {
-      // Always apply spoken punctuation replacement first
-      const punctuatedText = replaceSpokenPunctuation(text);
+      // Replace spoken punctuation words ("comma", "period") with symbols, unless
+      // punctuation is disabled entirely ("none" mode).
+      const punctuatedText = settingsRef.current.punctuationMode === "none"
+        ? text
+        : replaceSpokenPunctuation(text);
       if (!isFinal) {
         if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
         silenceTimerRef.current = setTimeout(() => {
@@ -682,7 +720,9 @@ export default function App() {
           const startsWithPunct = /^[.,!?:;]/.test(newFinalText);
           const combined = (accumulatedTextRef.current + (accumulatedTextRef.current && !startsWithPunct ? " " : "") + newFinalText).trim();
           // Split on every "next line" variant to get individual blocks
-          const segments = combined.split(/(?:next line|x line|next slide|x slide|next lie|x lie)\s*[.,!?:;]*/gi).map(s => s.trim()).filter(Boolean);
+          // COMMENTED OUT: the \s*[.,!?:;]* suffix consumed punctuation Azure attached to the marker.
+          // const segments = combined.split(/(?:next line|x line|next slide|x slide|next lie|x lie)\s*[.,!?:;]*/gi).map(s => s.trim()).filter(Boolean);
+          const segments = combined.split(/(?:next line|x line|next slide|x slide|next lie|x lie)/gi).map(s => s.trim()).filter(Boolean);
           accumulatedTextRef.current = "";
           setAccumulatedTranscript("");
           setTranscript("");
