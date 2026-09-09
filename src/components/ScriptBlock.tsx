@@ -37,7 +37,7 @@ export const ScriptBlock: React.FC<ScriptBlockProps> = ({ block, index, blocks, 
           newBlocks.splice(index, 1);
           updateBlocks(newBlocks);
         }}
-        className="absolute -right-10 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 transition-opacity p-1.5 flex items-center justify-center"
+        className="absolute -right-6.25 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-700 transition-colors transition-opacity p-1.5 flex items-center justify-center"
         title="Delete block"
       >
         <Trash2 size={14} />
@@ -118,7 +118,7 @@ export const ScriptBlock: React.FC<ScriptBlockProps> = ({ block, index, blocks, 
                     updateBlockParsed({ ...block.parsed, speaker: val });
                   }
                 }}
-                className="outline-none focus:bg-stone-100 px-1 rounded-xs transition-colors cursor-text inline-block min-w-[50px]"
+                className="outline-none focus:bg-stone-100 pt-1 px-1 rounded-xs transition-colors cursor-text inline-block min-w-[50px]"
               >
                 {block.parsed.speaker}
               </div>

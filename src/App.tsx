@@ -1166,7 +1166,7 @@ export default function App() {
                     }
                   });
                 }}
-                className="p-2 text-red-500 hover:bg-red-50 rounded-md transition-colors flex-shrink-0"
+                className="p-2 text-slate-500 hover:text-red-600 rounded-md transition-colors flex-shrink-0"
                 title="Clear script"
               >
                 <Trash2 size={16} />
